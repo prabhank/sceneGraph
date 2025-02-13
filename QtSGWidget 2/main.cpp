@@ -37,6 +37,13 @@ int main(int argc, char *argv[])
     Q_INIT_RESOURCE(resources);
     Q_INIT_RESOURCE(qml);
 
+    // Initialize resources for images and data
+    Q_INIT_RESOURCE(resources);
+    
+    // Verify resources are loaded correctly
+    ResourceVerifier::verifyResources();
+    ResourceVerifier::verifyImages();
+
     // Register types
     qmlRegisterType<CustomRectangle>("Custom", 1, 0, "CustomRectangle");
     qmlRegisterType<CustomListView>("Custom", 1, 0, "CustomListView");

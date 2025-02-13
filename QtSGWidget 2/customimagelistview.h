@@ -7,11 +7,14 @@
 #include <QQmlEngine>
 #include <QNetworkAccessManager>
 #include <QMap>
+#include <QSGGeometryNode>  // Change from forward declaration to full include
 #include "texturebuffer.h"
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 
 class QSGTexture;
-class QSGGeometryNode;
-class QSGGeometry;  // Add this forward declaration
+class QSGGeometry;
 
 class CustomImageListView : public QQuickItem
 {
@@ -34,6 +37,33 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(qreal itemHeight READ itemHeight WRITE setItemHeight NOTIFY itemHeightChanged)
     Q_PROPERTY(qreal rowSpacing READ rowSpacing WRITE setRowSpacing NOTIFY rowSpacingChanged)
     Q_PROPERTY(QStringList rowTitles READ rowTitles WRITE setRowTitles NOTIFY rowTitlesChanged)
+    Q_PROPERTY(QUrl jsonSource READ jsonSource WRITE setJsonSource NOTIFY jsonSourceChanged)
+
+private:
+    // Add the network manager to private member variables section
+    QNetworkAccessManager* m_networkManager = nullptr;
+    int m_count = 15;
+    qreal m_itemWidth = 200;
+    qreal m_itemHeight = 200;
+    qreal m_spacing = 15;
+    qreal m_rowSpacing = 40;
+    bool m_useLocalImages = false;
+    QString m_imagePrefix = "qrc:/images/";
+    QVariantList m_imageUrls;
+    QStringList m_imageTitles;
+    int m_currentIndex = 0;
+    QVariantList m_localImageUrls;
+    QVariantList m_remoteImageUrls;
+    int m_rowCount = 2;
+    qreal m_contentX = 0;
+    qreal m_contentY = 0;
+    QStringList m_rowTitles;
+    bool m_windowReady = false;
+    bool m_isDestroying = false;
+    bool m_isLoading = false;
+    int m_itemsPerRow = 5;
+    QUrl m_jsonSource;
+    QMutex m_loadMutex;
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
@@ -90,6 +120,9 @@ public:
     QStringList rowTitles() const { return m_rowTitles; }
     void setRowTitles(const QStringList &titles);
 
+    QUrl jsonSource() const { return m_jsonSource; }
+    void setJsonSource(const QUrl &source);
+
 signals:
     void countChanged();
     void itemWidthChanged();
@@ -109,6 +142,7 @@ signals:
     void itemHeightChanged();
     void rowSpacingChanged();
     void rowTitlesChanged();
+    void jsonSourceChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;
@@ -121,43 +155,18 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
-    QString generateImageUrl(int index) const;
-    void loadImage(int index);
+    // Add loadAllImages declaration with other loading-related methods
     void loadAllImages();
-
-    struct TexturedNode {
-        TexturedNode() : node(nullptr), texture(nullptr), index(-1) {}
-        ~TexturedNode() {
-            delete node;
-            // Don't delete texture here, TextureBuffer manages it
-            node = nullptr;
-            texture = nullptr;
-        }
-        QSGGeometryNode *node;
-        QSGTexture *texture;
-        int index;  // Add this member
-    };
-
-    QSGGeometryNode* createTexturedRect(const QRectF &rect, QSGTexture *texture);
-    QSGGeometryNode* createTextNode(const QString &text, const QRectF &rect);
-    QSGGeometryNode* createOptimizedTextNode(const QString &text, const QRectF &rect);  // Add this for optimized text node
-
-    QMap<int, TexturedNode> m_nodes;
-
-    int m_count = 15;  // 3 rows x 5 images
-    qreal m_itemWidth = 200;
-    qreal m_spacing = 15;
-    QNetworkAccessManager *m_networkManager;
-    QMap<int, QImage> m_loadedImages;
-    bool m_useLocalImages = false;
-    QString m_imagePrefix = "qrc:/images/";
-    QVariantList m_imageUrls;
-    QStringList m_imageTitles;
+    QString generateImageUrl(int index) const;
     QImage loadLocalImage(int index) const;
+    QImage loadLocalImageFromPath(const QString &path) const;
+    void loadImage(int index);
+    void loadUrlImage(int index, const QUrl &url);
+    void handleNetworkReply(QNetworkReply *reply, int index);
+    void processLoadedImage(int index, const QImage &image);
+
     void debugResourceSystem() const;  // Add this line
-    bool m_windowReady = false;
     void tryLoadImages();
-    int m_currentIndex = 0;
     void updateFocus();
     void navigateLeft();
     void navigateRight();
@@ -165,44 +174,58 @@ private:
     void navigateUp();
     void navigateDown();
     void ensureIndexVisible(int index);
-    qreal m_contentX = 0;
-    qreal m_contentY = 0;
 
     // Remove static texture cache as TextureBuffer handles it
 
     // Add new members for URL handling
-    void loadUrlImage(int index, const QUrl &url);
-    void handleNetworkReply(QNetworkReply *reply, int index);
     QHash<int, QNetworkReply*> m_pendingRequests;
     QHash<QUrl, QImage> m_urlImageCache;
-    void processLoadedImage(int index, const QImage &image);  // Add this declaration
 
-    QVariantList m_localImageUrls;
-    QVariantList m_remoteImageUrls;
-    int m_rowCount = 2;
     int getRowFromIndex(int index) const { return index / m_itemsPerRow; }
     int getColumnFromIndex(int index) const { return index % m_itemsPerRow; }
-    int m_itemsPerRow = 5;  // Add this member
 
-    qreal m_itemHeight = 200;
-    qreal m_rowSpacing = 40;
-    QStringList m_rowTitles;
     QSGGeometryNode* createRowTitleNode(const QString &text, const QRectF &rect);
 
     void createFallbackTexture(int index);  // Add this declaration
     bool isReadyForTextures() const;  // Add this declaration
     void cleanupTextures();  // Add this declaration
 
+    // Add TexturedNode structure definition before it's used
+    struct TexturedNode {
+        TexturedNode() : node(nullptr), texture(nullptr) {}
+        ~TexturedNode() {
+            delete node;
+            node = nullptr;
+            texture = nullptr;
+        }
+        QSGGeometryNode *node;
+        QSGTexture *texture;
+    };
+
     void cleanupNode(TexturedNode& node);
+    QMap<int, TexturedNode> m_nodes;
+
     void limitTextureCacheSize(int maxTextures = 10);
     void safeReleaseTextures();
     bool ensureValidWindow() const;
     
-    QMutex m_loadMutex;
-    bool m_isDestroying = false;
-    
     static constexpr int MAX_LOADED_TEXTURES = 10;
-    bool m_isLoading = false;
+
+    void loadFromJson(const QUrl &source);
+    void processJsonData(const QByteArray &data);
+    struct ImageData {
+        QString url;
+        QString title;
+        QString category;
+    };
+    QVector<ImageData> m_imageData;
+
+    // Organize all node creation methods together in one place
+    QSGGeometryNode* createTexturedRect(const QRectF &rect, QSGTexture *texture);
+   // QSGGeometryNode* createRowTitleNode(const QString &text, const QRectF &rect);
+    QSGGeometryNode* createOptimizedTextNode(const QString &text, const QRectF &rect);
+    void addSelectionEffects(QSGNode* container, const QRectF& rect);
+    void addTitleOverlay(QSGNode* container, const QRectF& rect, const QString& title);
 };
 
 #endif // CUSTOMIMAGELISTVIEW_H

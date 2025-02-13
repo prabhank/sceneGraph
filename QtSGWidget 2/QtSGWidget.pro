@@ -30,8 +30,9 @@ HEADERS += \
     texturebuffer.h \
     # ... existing headers ...
 
-RESOURCES += qml.qrc \
-    resources.qrc
+RESOURCES += \
+    resources.qrc \
+    qml.qrc
 
 # Additional import path used to resolve QML modules in Qt Creator's code model
 QML_IMPORT_PATH =

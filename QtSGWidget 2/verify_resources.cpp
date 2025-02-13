@@ -75,7 +75,7 @@ void ResourceVerifier::debugImageInfo(const QString &path)
     }
 }
 
-bool verifyResources()
+bool ResourceVerifier::verifyResources()
 {
     // Minimal checks
     QStringList resourcePaths = {

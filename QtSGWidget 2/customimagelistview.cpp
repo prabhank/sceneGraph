@@ -265,7 +265,8 @@ QImage CustomImageListView::loadLocalImage(int index) const
     // Ensure index is within bounds of available images
     int actualIndex = (index % 5) + 1; // We have img1.jpg through img5.jpg
     
-    imagePath = QString(":/images/img%1.jpg").arg(actualIndex);
+    // Update path to match new structure
+    imagePath = QString(":/data/images/img%1.jpg").arg(actualIndex);
     
     qDebug() << "\nTrying to load image at index:" << index;
     qDebug() << "Using actual image path:" << imagePath;
@@ -349,7 +350,7 @@ bool CustomImageListView::isReadyForTextures() const
 
 void CustomImageListView::loadImage(int index)
 {
-    if (m_isDestroying || !ensureValidWindow()) {
+    if (m_isDestroying || !ensureValidWindow() || index >= m_imageData.size()) {
         return;
     }
 
@@ -369,20 +370,13 @@ void CustomImageListView::loadImage(int index)
         cleanupNode(m_nodes[index]);
     }
 
-    int imageIndex = (index % 5) + 1;
-    QString imagePath = QString(":/images/img%1.jpg").arg(imageIndex);
+    // Load from URL
+    const ImageData &imgData = m_imageData[index];
+    QUrl url(imgData.url);
     
-    QSGTexture* texture = TextureBuffer::instance().acquire(window(), imagePath);
-    if (texture) {
-        TexturedNode node;
-        node.texture = texture;  // Just store the pointer
-        node.node = nullptr;
-        node.index = index;
-        m_nodes[index] = node;
-        update();
-        qDebug() << "Successfully loaded image" << index;
+    if (url.isValid()) {
+        loadUrlImage(index, url);
     } else {
-        qWarning() << "Failed to load image" << index << ", creating fallback";
         createFallbackTexture(index);
     }
 
@@ -420,8 +414,40 @@ void CustomImageListView::createFallbackTexture(int index)
     }
 }
 
+QImage CustomImageListView::loadLocalImageFromPath(const QString &path) const
+{
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        QByteArray imageData = file.readAll();
+        QImage image;
+        if (image.loadFromData(imageData)) {
+            qDebug() << "Successfully loaded image from:" << path;
+            qDebug() << "Image size:" << image.size();
+            file.close();
+            return image;
+        }
+        file.close();
+    }
+
+    qDebug() << "Failed to load image from:" << path;
+    return QImage();
+}
+
 void CustomImageListView::loadUrlImage(int index, const QUrl &url)
 {
+    QString urlStr = url.toString();
+    
+    // Handle resource URLs
+    if (url.scheme() == "qrc") {
+        // Convert qrc:/path to :/path format
+        urlStr = ":" + url.path();
+        QImage image = loadLocalImageFromPath(urlStr);
+        if (!image.isNull()) {
+            processLoadedImage(index, image);
+            return;
+        }
+    }
+    
     // Check cache first
     if (m_urlImageCache.contains(url)) {
         QImage image = m_urlImageCache[url];
@@ -429,21 +455,23 @@ void CustomImageListView::loadUrlImage(int index, const QUrl &url)
         return;
     }
 
-    // Cancel any existing request for this index
-    if (m_pendingRequests.contains(index)) {
-        m_pendingRequests[index]->abort();
-        m_pendingRequests[index]->deleteLater();
-        m_pendingRequests.remove(index);
+    // For network URLs, proceed with network request
+    if (url.scheme().startsWith("http")) {
+        // Cancel any existing request for this index
+        if (m_pendingRequests.contains(index)) {
+            m_pendingRequests[index]->abort();
+            m_pendingRequests[index]->deleteLater();
+            m_pendingRequests.remove(index);
+        }
+
+        QNetworkRequest request(url);
+        QNetworkReply *reply = m_networkManager->get(request);
+        m_pendingRequests[index] = reply;
+
+        connect(reply, &QNetworkReply::finished, this, [this, reply, index]() {
+            handleNetworkReply(reply, index);
+        });
     }
-
-    // Start new request
-    QNetworkRequest request(url);
-    QNetworkReply *reply = m_networkManager->get(request);
-    m_pendingRequests[index] = reply;
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, index]() {
-        handleNetworkReply(reply, index);
-    });
 }
 
 void CustomImageListView::handleNetworkReply(QNetworkReply *reply, int index)
@@ -532,43 +560,33 @@ QSGGeometryNode* CustomImageListView::createOptimizedTextNode(const QString &tex
         return nullptr;
     }
 
-    QString cacheKey = QString("text_%1").arg(text);
-    QSGTexture* texture = TextureBuffer::instance().acquire(window(), cacheKey);
+    // Create new texture for text (don't use caching for now)
+    int width = qMax(1, static_cast<int>(std::ceil(rect.width())));
+    int height = qMax(1, static_cast<int>(std::ceil(rect.height())));
     
-    if (!texture) {
-        // Create new texture for text
-        int width = qMax(1, static_cast<int>(std::ceil(rect.width())));
-        int height = qMax(1, static_cast<int>(std::ceil(rect.height())));
-        
-        QImage textImage(width, height, QImage::Format_ARGB32_Premultiplied);
-        if (textImage.isNull()) {
-            return nullptr;
-        }
-        
-        textImage.fill(QColor(0, 0, 0, 0));
-        
-        QPainter painter;
-        if (!painter.begin(&textImage)) {
-            return nullptr;
-        }
-
-        static const QFont itemFont("Arial", 12);
-        painter.setFont(itemFont);
-        painter.setPen(Qt::white);
-        painter.setRenderHints(QPainter::TextAntialiasing);
-        painter.drawText(textImage.rect(), Qt::AlignCenter, text);
-        painter.end();
-        
-        texture = window()->createTextureFromImage(
-            textImage,
-            QQuickWindow::TextureHasAlphaChannel
-        );
-        
-        if (texture) {
-            // Store in TextureBuffer instead of m_textureCache
-            TextureBuffer::instance().acquire(window(), cacheKey);
-        }
+    QImage textImage(width, height, QImage::Format_ARGB32_Premultiplied);
+    if (textImage.isNull()) {
+        return nullptr;
     }
+    
+    textImage.fill(QColor(0, 0, 0, 0));
+    
+    QPainter painter;
+    if (!painter.begin(&textImage)) {
+        return nullptr;
+    }
+
+    static const QFont itemFont("Arial", 12);
+    painter.setFont(itemFont);
+    painter.setPen(Qt::white);
+    painter.setRenderHints(QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+    painter.drawText(textImage.rect(), Qt::AlignCenter, text);
+    painter.end();
+    
+    QSGTexture *texture = window()->createTextureFromImage(
+        textImage,
+        QQuickWindow::TextureHasAlphaChannel
+    );
     
     return texture ? createTexturedRect(rect, texture) : nullptr;
 }
@@ -579,24 +597,20 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
         return nullptr;
     }
 
-    // Ensure minimum dimensions
+    // Create image with guaranteed valid dimensions
     int width = qMax(1, static_cast<int>(std::ceil(rect.width())));
     int height = qMax(1, static_cast<int>(std::ceil(rect.height())));
 
-    // Create image with guaranteed valid dimensions
     QImage textImage(width, height, QImage::Format_ARGB32_Premultiplied);
     if (textImage.isNull()) {
         qWarning() << "Failed to create text image with size:" << width << "x" << height;
         return nullptr;
     }
 
-    // Initialize image with transparent background
     textImage.fill(QColor(0, 0, 0, 0));
 
-    // Create and configure painter
     QPainter painter;
-    bool started = painter.begin(&textImage);
-    if (!started) {
+    if (!painter.begin(&textImage)) {
         qWarning() << "Failed to start painting on image";
         return nullptr;
     }
@@ -607,10 +621,10 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
     painter.setPen(Qt::white);
     painter.setRenderHints(QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
 
-    // Draw text centered vertically
+    // Draw text with left alignment and vertical centering
     QFontMetrics fm(titleFont);
     int yPos = (height + fm.ascent() - fm.descent()) / 2;
-    painter.drawText(0, yPos, text);
+    painter.drawText(10, yPos, text); // Add 10px left margin
     
     painter.end();
 
@@ -648,136 +662,144 @@ QSGNode *CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
     
     // Calculate layout
     m_itemsPerRow = qMax(1, int((width() + m_spacing) / (m_itemWidth + m_spacing)));
-    int totalRows = (m_count + m_itemsPerRow - 1) / m_itemsPerRow;
-
-    // Track current Y position
+    
+    // Track current Y position and image index
     qreal currentY = -m_contentY;
-
-    // Create row containers
-    for (int row = 0; row < totalRows; ++row) {
-        // Add spacing between rows (except first row)
-        if (row > 0) {
+    int currentImageIndex = 0;
+    
+    // Create category containers
+    for (int categoryIndex = 0; categoryIndex < m_rowTitles.size(); ++categoryIndex) {
+        // Add spacing between categories (except first)
+        if (categoryIndex > 0) {
             currentY += m_rowSpacing;
         }
 
-        // Add row title
-        if (row < m_rowTitles.size()) {
-            QRectF titleRect(0, currentY, width(), 40);
-            QSGGeometryNode *titleNode = createRowTitleNode(m_rowTitles[row], titleRect);
-            if (titleNode) {
-                parentNode->appendChildNode(titleNode);
+        // Add category title
+        QString categoryName = m_rowTitles[categoryIndex];
+        QRectF titleRect(0, currentY, width(), 40);
+        QSGGeometryNode *titleNode = createRowTitleNode(categoryName, titleRect);
+        if (titleNode) {
+            parentNode->appendChildNode(titleNode);
+        }
+        currentY += 40; // Add title height
+
+        // Count images in this category
+        int categoryImageCount = 0;
+        for (const ImageData &imgData : m_imageData) {
+            if (imgData.category == categoryName) {
+                categoryImageCount++;
             }
-            currentY += 40; // Add title height
         }
 
-        // Calculate items for this row
-        for (int col = 0; col < m_itemsPerRow; ++col) {
-            int index = row * m_itemsPerRow + col;
-            if (index >= m_count || !m_nodes.contains(index)) continue;
-
-            qreal xPos = col * (m_itemWidth + m_spacing);
-            QRectF rect(xPos - m_contentX, currentY, m_itemWidth, m_itemHeight);
-
-            // Skip if completely outside visible area
-            if (rect.bottom() < 0 || rect.top() > height()) continue;
-
-            // Create container node for this item
-            QSGNode* itemContainer = new QSGNode;
-            
-            // Add base image
-            if (m_nodes[index].texture) {
-                QSGGeometryNode *imageNode = createTexturedRect(rect, m_nodes[index].texture);
-                itemContainer->appendChildNode(imageNode);
-                m_nodes[index].node = imageNode;
-            }
-
-            // Add focus/hover effects if this is the current item
-            if (index == m_currentIndex) {
-                // Inner glow
-                QSGGeometryNode *glowNode = new QSGGeometryNode;
-                QSGGeometry *glowGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 4);
-                glowGeometry->setDrawingMode(GL_TRIANGLE_STRIP);
-                
-                QRectF glowRect = rect.adjusted(-2, -2, 2, 2);
-                QSGGeometry::Point2D *glowVertices = glowGeometry->vertexDataAsPoint2D();
-                glowVertices[0].set(glowRect.left(), glowRect.top());
-                glowVertices[1].set(glowRect.right(), glowRect.top());
-                glowVertices[2].set(glowRect.left(), glowRect.bottom());
-                glowVertices[3].set(glowRect.right(), glowRect.bottom());
-                
-                glowNode->setGeometry(glowGeometry);
-                glowNode->setFlag(QSGNode::OwnsGeometry);
-                
-                QSGFlatColorMaterial *glowMaterial = new QSGFlatColorMaterial;
-                glowMaterial->setColor(QColor(0, 120, 215, hasActiveFocus() ? 180 : 100));
-                glowNode->setMaterial(glowMaterial);
-                glowNode->setFlag(QSGNode::OwnsMaterial);
-                
-                itemContainer->appendChildNode(glowNode);
-
-                // Focus border
-                QSGGeometryNode *focusNode = new QSGGeometryNode;
-                QSGGeometry *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 5);
-                geometry->setDrawingMode(GL_LINE_STRIP);
-                geometry->setLineWidth(3);
-                
-                QSGGeometry::Point2D *vertices = geometry->vertexDataAsPoint2D();
-                vertices[0].set(rect.left(), rect.top());
-                vertices[1].set(rect.right(), rect.top());
-                vertices[2].set(rect.right(), rect.bottom());
-                vertices[3].set(rect.left(), rect.bottom());
-                vertices[4].set(rect.left(), rect.top());
-                
-                focusNode->setGeometry(geometry);
-                focusNode->setFlag(QSGNode::OwnsGeometry);
-                
-                QSGFlatColorMaterial *material = new QSGFlatColorMaterial;
-                material->setColor(hasActiveFocus() ? QColor(0, 120, 215) : QColor(128, 128, 128));
-                focusNode->setMaterial(material);
-                focusNode->setFlag(QSGNode::OwnsMaterial);
-                
-                itemContainer->appendChildNode(focusNode);
-            }
-
-            // Add title overlay
-            if (index < m_imageTitles.size()) {
-                // Create semi-transparent background for text
-                QSGGeometryNode *textBgNode = new QSGGeometryNode;
-                QSGGeometry *bgGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 4);
-                bgGeometry->setDrawingMode(GL_TRIANGLE_STRIP);
-                
-                QRectF textRect(rect.left(), rect.bottom() - 40, rect.width(), 40);
-                QSGGeometry::Point2D *bgVertices = bgGeometry->vertexDataAsPoint2D();
-                bgVertices[0].set(textRect.left(), textRect.top());
-                bgVertices[1].set(textRect.right(), textRect.top());
-                bgVertices[2].set(textRect.left(), textRect.bottom());
-                bgVertices[3].set(textRect.right(), textRect.bottom());
-                
-                textBgNode->setGeometry(bgGeometry);
-                textBgNode->setFlag(QSGNode::OwnsGeometry);
-                
-                QSGFlatColorMaterial *bgMaterial = new QSGFlatColorMaterial;
-                bgMaterial->setColor(QColor(0, 0, 0, 128));
-                textBgNode->setMaterial(bgMaterial);
-                textBgNode->setFlag(QSGNode::OwnsMaterial);
-                
-                itemContainer->appendChildNode(textBgNode);
-
-                // Create text using optimized texture atlas
-                QString title = m_imageTitles[index];
-                QSGGeometryNode *textNode = createOptimizedTextNode(title, textRect);
-                if (textNode) {
-                    itemContainer->appendChildNode(textNode);
+        // Calculate rows needed for this category
+        int rowsInCategory = (categoryImageCount + m_itemsPerRow - 1) / m_itemsPerRow;
+        
+        // Create rows for this category
+        int imagesInCategory = 0;
+        for (int row = 0; row < rowsInCategory && currentImageIndex < m_count; ++row) {
+            for (int col = 0; col < m_itemsPerRow && imagesInCategory < categoryImageCount; ++col) {
+                if (!m_nodes.contains(currentImageIndex)) {
+                    currentImageIndex++;
+                    imagesInCategory++;
+                    continue;
                 }
+
+                qreal xPos = col * (m_itemWidth + m_spacing);
+                QRectF rect(xPos - m_contentX, currentY, m_itemWidth, m_itemHeight);
+
+                // Skip if outside visible area
+                if (rect.bottom() < 0 || rect.top() > height()) {
+                    currentImageIndex++;
+                    imagesInCategory++;
+                    continue;
+                }
+
+                // Create item container and add image
+                QSGNode* itemContainer = new QSGNode;
+                if (m_nodes[currentImageIndex].texture) {
+                    QSGGeometryNode *imageNode = createTexturedRect(rect, m_nodes[currentImageIndex].texture);
+                    itemContainer->appendChildNode(imageNode);
+                    m_nodes[currentImageIndex].node = imageNode;
+                }
+
+                // Add selection/focus effects
+                if (currentImageIndex == m_currentIndex) {
+                    addSelectionEffects(itemContainer, rect);
+                }
+
+                // Add title overlay
+                if (currentImageIndex < m_imageData.size()) {
+                    addTitleOverlay(itemContainer, rect, m_imageData[currentImageIndex].title);
+                }
+
+                parentNode->appendChildNode(itemContainer);
+                currentImageIndex++;
+                imagesInCategory++;
             }
-
-            parentNode->appendChildNode(itemContainer);
+            currentY += m_itemHeight + m_rowSpacing;
         }
-
-        currentY += m_itemHeight; // Add row height
     }
     
     return parentNode;
+}
+
+// Helper method for selection effects
+void CustomImageListView::addSelectionEffects(QSGNode* container, const QRectF& rect)
+{
+    // Add glow effect
+    QSGGeometryNode *glowNode = new QSGGeometryNode;
+    QSGGeometry *glowGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 4);
+    glowGeometry->setDrawingMode(GL_TRIANGLE_STRIP);
+    
+    QRectF glowRect = rect.adjusted(-2, -2, 2, 2);
+    QSGGeometry::Point2D *glowVertices = glowGeometry->vertexDataAsPoint2D();
+    glowVertices[0].set(glowRect.left(), glowRect.top());
+    glowVertices[1].set(glowRect.right(), glowRect.top());
+    glowVertices[2].set(glowRect.left(), glowRect.bottom());
+    glowVertices[3].set(glowRect.right(), glowRect.bottom());
+    
+    glowNode->setGeometry(glowGeometry);
+    glowNode->setFlag(QSGNode::OwnsGeometry);
+    
+    QSGFlatColorMaterial *glowMaterial = new QSGFlatColorMaterial;
+    glowMaterial->setColor(QColor(0, 120, 215, hasActiveFocus() ? 180 : 100));
+    glowNode->setMaterial(glowMaterial);
+    glowNode->setFlag(QSGNode::OwnsMaterial);
+    
+    container->appendChildNode(glowNode);
+}
+
+// Helper method for title overlay
+void CustomImageListView::addTitleOverlay(QSGNode* container, const QRectF& rect, const QString& title)
+{
+    QRectF textRect(rect.left(), rect.bottom() - 40, rect.width(), 40);
+    
+    // Add semi-transparent background
+    QSGGeometryNode *textBgNode = new QSGGeometryNode;
+    QSGGeometry *bgGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 4);
+    bgGeometry->setDrawingMode(GL_TRIANGLE_STRIP);
+    
+    QSGGeometry::Point2D *bgVertices = bgGeometry->vertexDataAsPoint2D();
+    bgVertices[0].set(textRect.left(), textRect.top());
+    bgVertices[1].set(textRect.right(), textRect.top());
+    bgVertices[2].set(textRect.left(), textRect.bottom());
+    bgVertices[3].set(textRect.right(), textRect.bottom());
+    
+    textBgNode->setGeometry(bgGeometry);
+    textBgNode->setFlag(QSGNode::OwnsGeometry);
+    
+    QSGFlatColorMaterial *bgMaterial = new QSGFlatColorMaterial;
+    bgMaterial->setColor(QColor(0, 0, 0, 128));
+    textBgNode->setMaterial(bgMaterial);
+    textBgNode->setFlag(QSGNode::OwnsMaterial);
+    
+    container->appendChildNode(textBgNode);
+
+    // Add text
+    QSGGeometryNode *textNode = createOptimizedTextNode(title, textRect);
+    if (textNode) {
+        container->appendChildNode(textNode);
+    }
 }
 
 // Add this new function
@@ -909,10 +931,60 @@ void CustomImageListView::navigateRight()
 
 void CustomImageListView::navigateUp()
 {
-    int newIndex = m_currentIndex - m_itemsPerRow;
-    if (newIndex >= 0) {
-        setCurrentIndex(newIndex);
-        ensureIndexVisible(newIndex);
+    // Get current category and position info
+    QString currentCategory = m_imageData[m_currentIndex].category;
+    int categoryIndex = m_rowTitles.indexOf(currentCategory);
+    
+    // Can't go up from first category
+    if (categoryIndex <= 0) {
+        return;
+    }
+
+    // Calculate current column in current row
+    int currentCol = 0;
+    int itemsInCategory = 0;
+    
+    // Count items until current index to determine column
+    for (int i = 0; i < m_imageData.size(); i++) {
+        if (m_imageData[i].category == currentCategory) {
+            if (i == m_currentIndex) {
+                currentCol = itemsInCategory % m_itemsPerRow;
+                break;
+            }
+            itemsInCategory++;
+        }
+    }
+
+    // Get target category
+    QString targetCategory = m_rowTitles[categoryIndex - 1];
+    
+    // Find matching column position in previous category
+    int targetIndex = -1;
+    int col = 0;
+    int lastIndexInTargetCategory = -1;
+    
+    // Find first item with matching column or last item in category
+    for (int i = 0; i < m_imageData.size(); i++) {
+        if (m_imageData[i].category == targetCategory) {
+            if (col == currentCol) {
+                targetIndex = i;
+                break;
+            }
+            col = (col + 1) % m_itemsPerRow;
+            lastIndexInTargetCategory = i;
+        } else if (targetIndex >= 0) {
+            break; // Stop after target category
+        }
+    }
+
+    // If no matching column found, use last item in target category
+    if (targetIndex == -1 && lastIndexInTargetCategory >= 0) {
+        targetIndex = lastIndexInTargetCategory;
+    }
+
+    if (targetIndex >= 0) {
+        setCurrentIndex(targetIndex);
+        ensureIndexVisible(targetIndex);
         ensureFocus();
         update();
     }
@@ -920,10 +992,61 @@ void CustomImageListView::navigateUp()
 
 void CustomImageListView::navigateDown()
 {
-    int newIndex = m_currentIndex + m_itemsPerRow;
-    if (newIndex < m_count) {
-        setCurrentIndex(newIndex);
-        ensureIndexVisible(newIndex);
+    // Get current category and position info
+    QString currentCategory = m_imageData[m_currentIndex].category;
+    int categoryIndex = m_rowTitles.indexOf(currentCategory);
+    
+    // Can't go down from last category
+    if (categoryIndex >= m_rowTitles.size() - 1) {
+        return;
+    }
+
+    // Calculate current column in current row
+    int currentCol = 0;
+    int itemsInCategory = 0;
+    
+    // Count items until current index to determine column
+    for (int i = 0; i < m_imageData.size(); i++) {
+        if (m_imageData[i].category == currentCategory) {
+            if (i == m_currentIndex) {
+                currentCol = itemsInCategory % m_itemsPerRow;
+                break;
+            }
+            itemsInCategory++;
+        }
+    }
+
+    // Get target category
+    QString targetCategory = m_rowTitles[categoryIndex + 1];
+    
+    // Find matching column position in next category
+    int targetIndex = -1;
+    int col = 0;
+    
+    // Find first item with matching column
+    for (int i = 0; i < m_imageData.size(); i++) {
+        if (m_imageData[i].category == targetCategory) {
+            if (col == currentCol) {
+                targetIndex = i;
+                break;
+            }
+            col = (col + 1) % m_itemsPerRow;
+        }
+    }
+
+    // If no matching column found, use first item in target category
+    if (targetIndex == -1) {
+        for (int i = 0; i < m_imageData.size(); i++) {
+            if (m_imageData[i].category == targetCategory) {
+                targetIndex = i;
+                break;
+            }
+        }
+    }
+
+    if (targetIndex >= 0) {
+        setCurrentIndex(targetIndex);
+        ensureIndexVisible(targetIndex);
         ensureFocus();
         update();
     }
@@ -931,25 +1054,74 @@ void CustomImageListView::navigateDown()
 
 void CustomImageListView::ensureIndexVisible(int index)
 {
-    int row = getRowFromIndex(index);
-    int col = getColumnFromIndex(index);
-    
-    qreal itemY = row * (m_itemHeight + m_rowSpacing) + 50;  // Account for title
-    qreal itemX = col * (m_itemWidth + m_spacing);
-    
-    // Adjust vertical scroll
-    if (itemY < m_contentY) {
-        setContentY(itemY - m_rowSpacing);  // Show a bit of the previous row
-    } else if ((itemY + m_itemHeight) > (m_contentY + height())) {
-        setContentY(itemY + m_itemHeight - height() + m_rowSpacing);
+    if (index < 0 || index >= m_imageData.size()) {
+        return;
     }
+
+    // Find category for this index
+    QString targetCategory = m_imageData[index].category;
+    int categoryIndex = m_rowTitles.indexOf(targetCategory);
     
-    // Adjust horizontal scroll
-    if (itemX < m_contentX) {
-        setContentX(itemX - m_spacing);
-    } else if ((itemX + m_itemWidth) > (m_contentX + width())) {
-        setContentX(itemX + m_itemWidth - width() + m_spacing);
+    qreal yOffset = m_rowSpacing;  // Initial padding
+    
+    // Calculate Y position for target category
+    for (int i = 0; i < categoryIndex; ++i) {
+        yOffset += m_rowSpacing * 2;  // Spacing between categories
+        yOffset += 40;  // Category title
+
+        // Count images in previous category
+        int prevCategoryImages = 0;
+        QString prevCategory = m_rowTitles[i];
+        for (const ImageData &imgData : m_imageData) {
+            if (imgData.category == prevCategory) {
+                prevCategoryImages++;
+            }
+        }
+
+        // Add height for previous category
+        int rows = (prevCategoryImages + m_itemsPerRow - 1) / m_itemsPerRow;
+        yOffset += rows * m_itemHeight;
+        if (rows > 1) {
+            yOffset += (rows - 1) * m_rowSpacing;
+        }
     }
+
+    // Add current category title
+    yOffset += 40;
+
+    // Find position within category
+    int categoryPosition = 0;
+    int targetPosition = 0;
+    for (int i = 0; i < m_imageData.size(); i++) {
+        if (m_imageData[i].category == targetCategory) {
+            if (i == index) {
+                targetPosition = categoryPosition;
+                break;
+            }
+            categoryPosition++;
+        }
+    }
+
+    // Calculate row and column
+    int row = targetPosition / m_itemsPerRow;
+    int col = targetPosition % m_itemsPerRow;
+
+    // Add height for rows in current category
+    yOffset += row * (m_itemHeight + m_rowSpacing);
+
+    // Calculate x position
+    qreal xOffset = col * (m_itemWidth + m_spacing);
+
+    // Center the item in view
+    qreal targetY = yOffset - (height() - m_itemHeight) / 2;
+    qreal targetX = xOffset - (width() - m_itemWidth) / 2;
+
+    // Bound the scroll positions
+    targetY = qBound(0.0, targetY, qMax(0.0, contentHeight() - height()));
+    targetX = qBound(0.0, targetX, qMax(0.0, contentWidth() - width()));
+
+    setContentY(targetY);
+    setContentX(targetX);
 }
 
 bool CustomImageListView::event(QEvent *e)
@@ -1026,38 +1198,63 @@ qreal CustomImageListView::contentWidth() const
 
 qreal CustomImageListView::contentHeight() const
 {
-    int totalRows = (m_count + m_itemsPerRow - 1) / m_itemsPerRow;
-    qreal height = 0;
+    qreal totalHeight = 0;
     
-    for (int row = 0; row < totalRows; ++row) {
-        if (row > 0) {
-            height += m_rowSpacing;
+    // Add initial padding
+    totalHeight += m_rowSpacing;
+    
+    for (int categoryIndex = 0; categoryIndex < m_rowTitles.size(); ++categoryIndex) {
+        // Add spacing between categories
+        if (categoryIndex > 0) {
+            totalHeight += m_rowSpacing * 2;  // Double spacing between categories
         }
-        if (row < m_rowTitles.size()) {
-            height += 40; // Title height
+
+        // Add category title height
+        totalHeight += 40;  // Title height
+
+        // Count images in this category
+        QString categoryName = m_rowTitles[categoryIndex];
+        int categoryImageCount = 0;
+        for (const ImageData &imgData : m_imageData) {
+            if (imgData.category == categoryName) {
+                categoryImageCount++;
+            }
         }
-        height += m_itemHeight;
+
+        // Calculate rows needed for this category
+        int rowsInCategory = (categoryImageCount + m_itemsPerRow - 1) / m_itemsPerRow;
+        
+        // Add height for all rows in this category
+        totalHeight += rowsInCategory * m_itemHeight;
+        
+        // Add spacing between rows within category
+        if (rowsInCategory > 1) {
+            totalHeight += (rowsInCategory - 1) * m_rowSpacing;
+        }
     }
+
+    // Add extra padding at bottom
+    totalHeight += m_rowSpacing * 2;
     
-    return height;
+    return totalHeight;
 }
 
 void CustomImageListView::wheelEvent(QWheelEvent *event)
 {
-    // Vertical scrolling
-    if (event->angleDelta().y() != 0) {
-        qreal delta = event->angleDelta().y() / 120.0 * 50.0;
-        qreal newY = m_contentY - delta;
-        newY = qBound(0.0, newY, qMax(0.0, contentHeight() - height()));
-        setContentY(newY);
-    }
+    // Calculate smooth scrolling delta
+    qreal verticalDelta = event->angleDelta().y() / 120.0 * m_itemHeight;
+    qreal horizontalDelta = event->angleDelta().x() / 120.0 * m_itemWidth;
     
-    // Horizontal scrolling
-    if (event->angleDelta().x() != 0) {
-        qreal delta = event->angleDelta().x() / 120.0 * 50.0;
-        qreal newX = m_contentX - delta;
+    if (event->modifiers() & Qt::ShiftModifier) {
+        // Horizontal scrolling with Shift key
+        qreal newX = m_contentX - horizontalDelta;
         newX = qBound(0.0, newX, qMax(0.0, contentWidth() - width()));
         setContentX(newX);
+    } else {
+        // Vertical scrolling
+        qreal newY = m_contentY - verticalDelta;
+        newY = qBound(0.0, newY, qMax(0.0, contentHeight() - height()));
+        setContentY(newY);
     }
     
     event->accept();
@@ -1092,5 +1289,116 @@ void CustomImageListView::cleanupTextures()
         cleanupNode(it.value());
     }
     m_nodes.clear();
+}
+
+void CustomImageListView::setJsonSource(const QUrl &source)
+{
+    if (m_jsonSource != source) {
+        m_jsonSource = source;
+        loadFromJson(source);
+        emit jsonSourceChanged();
+    }
+}
+
+void CustomImageListView::loadFromJson(const QUrl &source)
+{
+    if (source.scheme() == "qrc") {
+        // Load from resources
+        QString path = ":" + source.path();
+        QFile file(path);
+        
+        if (!file.open(QIODevice::ReadOnly)) {
+            // Try alternative path without leading colon
+            QString altPath = source.path();
+            if (altPath.startsWith("/")) {
+                altPath = altPath.mid(1);
+            }
+            altPath = ":" + altPath;
+            
+            QFile altFile(altPath);
+            if (altFile.open(QIODevice::ReadOnly)) {
+                processJsonData(altFile.readAll());
+                altFile.close();
+            } else {
+                qWarning() << "Failed to load JSON from both paths:";
+                qWarning() << "Primary path:" << path;
+                qWarning() << "Alternative path:" << altPath;
+            }
+        } else {
+            processJsonData(file.readAll());
+            file.close();
+        }
+    } else {
+        // Network loading
+        QNetworkRequest request(source);
+        QNetworkReply *reply = m_networkManager->get(request);
+
+        connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+            if (reply->error() == QNetworkReply::NoError) {
+                processJsonData(reply->readAll());
+            } else {
+                qWarning() << "Failed to load JSON:" << reply->errorString();
+            }
+            reply->deleteLater();
+        });
+    }
+}
+
+void CustomImageListView::processJsonData(const QByteArray &data)
+{
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull()) {
+        qWarning() << "Invalid JSON data";
+        return;
+    }
+
+    if (!doc.isObject()) {
+        qWarning() << "JSON root should be an object";
+        return;
+    }
+
+    QJsonObject root = doc.object();
+    QJsonArray categories = root["categories"].toArray();
+    
+    qDebug() << "\n=== Processing JSON Data ===";
+    qDebug() << "Number of categories:" << categories.size();
+    
+    m_imageData.clear();
+    m_rowTitles.clear();
+    
+    int totalImages = 0;
+    for (const QJsonValue &categoryVal : categories) {
+        QJsonObject category = categoryVal.toObject();
+        QString categoryName = category["name"].toString();
+        m_rowTitles.append(categoryName);
+        
+        QJsonArray images = category["images"].toArray();
+        qDebug() << "Category:" << categoryName << "Images count:" << images.size();
+        
+        for (const QJsonValue &imageVal : images) {
+            QJsonObject image = imageVal.toObject();
+            ImageData imgData;
+            imgData.url = image["url"].toString();
+            imgData.title = image["title"].toString();
+            imgData.category = categoryName;
+            m_imageData.append(imgData);
+            totalImages++;
+        }
+    }
+
+    // Update the view
+    m_count = m_imageData.size();
+    qDebug() << "Total images loaded:" << totalImages;
+    
+    // Force layout update
+    m_itemsPerRow = qMax(1, int((width() + m_spacing) / (m_itemWidth + m_spacing)));
+    
+    // Clean existing nodes before loading new ones
+    safeReleaseTextures();
+    
+    loadAllImages();
+    emit countChanged();
+    emit rowTitlesChanged();
+    update();
 }
 
