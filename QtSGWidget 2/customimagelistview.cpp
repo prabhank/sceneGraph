@@ -21,12 +21,33 @@
 #include "texturemanager.h"
 #include <QGuiApplication>
 #include <QOpenGLContext>
+#include <QSurfaceFormat>
+#include <QSGRendererInterface>
 
-// Update the constructor to initialize proper dimensions
 CustomImageListView::CustomImageListView(QQuickItem *parent)
     : QQuickItem(parent)
     , m_networkManager(new QNetworkAccessManager(this))
 {
+    // Enable OpenGL debug output
+    qputenv("QSG_INFO", "1");
+    
+    // Force OpenGL on desktop platforms
+    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
+    
+    // Set rendering backend
+    QQuickWindow::setSceneGraphBackend(QSGRendererInterface::OpenGL);
+    
+    // Configure surface format for better compatibility
+    QSurfaceFormat format;
+    format.setVersion(2, 1);  // OpenGL 2.1 for better compatibility
+    format.setProfile(QSurfaceFormat::NoProfile);
+    format.setDepthBufferSize(24);
+    format.setStencilBufferSize(8);
+    format.setSamples(0);  // Disable MSAA for better performance
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    QSurfaceFormat::setDefaultFormat(format);
+
+    // Set up rendering flags
     setFlag(ItemHasContents, true);
     setFlag(QQuickItem::ItemIsFocusScope, true);
     setAcceptedMouseButtons(Qt::LeftButton);
@@ -34,10 +55,9 @@ CustomImageListView::CustomImageListView(QQuickItem *parent)
     setAcceptHoverEvents(true);
     setActiveFocusOnTab(true);
 
-    // Set initial height - use setHeight instead of setMinimumHeight for QQuickItem
+    // Set initial dimensions
     setHeight(300);
-    setImplicitHeight(300);  // Also set implicit height for proper sizing in QML
-    // Don't load images in constructor - wait for componentComplete
+    setImplicitHeight(300);
 }
 
 void CustomImageListView::componentComplete()
@@ -856,6 +876,7 @@ void CustomImageListView::itemChange(ItemChange change, const ItemChangeData &da
     if (change == ItemSceneChange) {
         m_windowReady = (data.window != nullptr);
         if (m_windowReady) {
+            initializeGL();  // Initialize OpenGL when window is ready
             tryLoadImages();
         }
     }
@@ -1400,5 +1421,21 @@ void CustomImageListView::processJsonData(const QByteArray &data)
     emit countChanged();
     emit rowTitlesChanged();
     update();
+}
+
+void CustomImageListView::initializeGL()
+{
+    if (!window()) return;
+
+    // Connect to window's sceneGraphInitialized signal
+    connect(window(), &QQuickWindow::sceneGraphInitialized, this, [this]() {
+        // Verify OpenGL context
+        QOpenGLContext *context = window()->openglContext();
+        if (context) {
+            qDebug() << "OpenGL Version:" << context->format().majorVersion() 
+                     << "." << context->format().minorVersion();
+            qDebug() << "Using OpenGL:" << context->isValid();
+        }
+    }, Qt::DirectConnection);
 }
 

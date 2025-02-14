@@ -155,6 +155,9 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
+    // Add OpenGL initialization method
+    void initializeGL();
+    
     // Add loadAllImages declaration with other loading-related methods
     void loadAllImages();
     QString generateImageUrl(int index) const;
