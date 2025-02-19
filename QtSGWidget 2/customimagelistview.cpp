@@ -22,7 +22,7 @@
 #include <QGuiApplication>
 #include <QOpenGLContext>
 #include <QSurfaceFormat>
-#include <QSGRendererInterface>
+//#include <QSGRendererInterface>
 
 CustomImageListView::CustomImageListView(QQuickItem *parent)
     : QQuickItem(parent)
@@ -35,7 +35,7 @@ CustomImageListView::CustomImageListView(QQuickItem *parent)
     QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
     
     // Set rendering backend
-    QQuickWindow::setSceneGraphBackend(QSGRendererInterface::OpenGL);
+    //QQuickWindow::setSceneGraphBackend(QSGRendererInterface::OpenGL);
     
     // Configure surface format for better compatibility
     QSurfaceFormat format;
@@ -72,7 +72,7 @@ void CustomImageListView::componentComplete()
         });
 
         connect(window(), &QQuickWindow::beforeRendering, this, [this]() {
-            if (!m_windowReady && window()->isSceneGraphInitialized()) {
+            if (!m_windowReady) {
                 m_windowReady = true;
                 loadAllImages();
             }
@@ -360,11 +360,6 @@ bool CustomImageListView::isReadyForTextures() const
         return false;
     }
     
-    // Check if scene graph is initialized
-    if (!window()->isSceneGraphInitialized()) {
-        return false;
-    }
-    
     return true;
 }
 
@@ -405,7 +400,7 @@ void CustomImageListView::loadImage(int index)
 
 bool CustomImageListView::ensureValidWindow() const
 {
-    return window() && window()->isSceneGraphInitialized() && !m_isDestroying;
+    return window() && m_windowReady && !m_isDestroying;
 }
 
 void CustomImageListView::createFallbackTexture(int index)
@@ -664,7 +659,7 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
 
 QSGNode *CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
-    if (!window() || !window()->isSceneGraphInitialized()) {
+    if (!window() || !m_windowReady) {
         delete oldNode;
         return nullptr;
     }
