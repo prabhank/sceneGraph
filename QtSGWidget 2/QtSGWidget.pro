@@ -1,14 +1,10 @@
-QT += core gui quick
+QT += core gui network quick
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 TARGET = QtSGWidget
 TEMPLATE = app
 
 CONFIG += c++11
-
-# Optimize for embedded systems
-QMAKE_CXXFLAGS += -O2
-CONFIG += optimize_full
 
 # Source files
 SOURCES += \
@@ -18,8 +14,7 @@ SOURCES += \
     customimagelistview.cpp \
     verify_resources.cpp \
     texturemanager.cpp \
-    texturebuffer.cpp \
-    # ... existing sources ...
+    texturebuffer.cpp
 
 HEADERS += \
     customrectangle.h \
@@ -27,31 +22,63 @@ HEADERS += \
     customimagelistview.h \
     verify_resources.h \
     texturemanager.h \
-    texturebuffer.h \
-    # ... existing headers ...
+    texturebuffer.h
 
+# Resources
 RESOURCES += \
     resources.qrc \
     qml.qrc
 
-# Additional import path used to resolve QML modules in Qt Creator's code model
-QML_IMPORT_PATH =
+# Platform specific configurations
+unix {
+    # Try pkg-config first
+    system(pkg-config --exists openssl) {
+        message("Using pkg-config for OpenSSL")
+        PKGCONFIG += openssl
+    } else {
+        # Check common OpenSSL locations
+        exists(/usr/include/openssl/ssl.h) {
+            LIBS += -L/usr/lib -lssl -lcrypto
+        } else:exists(/usr/local/opt/openssl/include/openssl/ssl.h) {
+            # macOS with Homebrew OpenSSL
+            INCLUDEPATH += /usr/local/opt/openssl/include
+            LIBS += -L/usr/local/opt/openssl/lib -lssl -lcrypto
+        } else {
+            # Disable SSL if not found
+            message("OpenSSL not found - building without SSL support")
+            DEFINES += QT_NO_SSL
+        }
+    }
+}
 
-# Default rules for deployment
-qnx: target.path = /tmp/$${TARGET}/bin
-else: unix:!android: target.path = /opt/$${TARGET}/bin
-!isEmpty(target.path): INSTALLS += target
+# Raspberry Pi specific settings
+linux-rasp-pi-* {
+    DEFINES += RASPBERRY_PI
+    QMAKE_CXXFLAGS += -mfpu=neon-vfpv4 -mfloat-abi=hard
+    
+    # Try to use system SSL on Raspberry Pi
+    exists(/usr/include/openssl/ssl.h) {
+        LIBS += -lssl -lcrypto
+    } else {
+        DEFINES += QT_NO_SSL
+    }
+}
+
+# For Windows
+win32 {
+    LIBS += -lssleay32 -llibeay32
+}
 
 # Enable OpenGL ES 2.0 on embedded platforms
 android|ios|qnx {
     DEFINES += QT_OPENGL_ES_2
 }
 
-# For Raspberry Pi specific optimizations
-linux-rasp-pi-* {
-    DEFINES += RASPBERRY_PI
-    QMAKE_CXXFLAGS += -mfpu=neon-vfpv4 -mfloat-abi=hard
-}
+# Default deployment rules
+qnx: target.path = /tmp/$${TARGET}/bin
+else: unix:!android: target.path = /opt/$${TARGET}/bin
+!isEmpty(target.path): INSTALLS += target
 
-# Default rules for deployment.
-include(deployment.pri)
+# Network configuration
+DEFINES += QT_NETWORK_LIB
+DEFINES += QT_NO_SSL=0

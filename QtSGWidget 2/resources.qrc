@@ -2,7 +2,8 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>main.qml</file>
-        <file>data/images.json</file>
+        <file>data/embeddedHubMenu.json</file>
+        <file>data/uiSettings.json</file>
         <file>data/images/img1.jpg</file>
         <file>data/images/img2.jpg</file>
         <file>data/images/img3.jpg</file>
