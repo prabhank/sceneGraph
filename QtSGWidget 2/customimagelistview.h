@@ -12,6 +12,8 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 
 class QSGTexture;
 class QSGGeometry;
@@ -64,6 +66,44 @@ private:
     int m_itemsPerRow = 5;
     QUrl m_jsonSource;
     QMutex m_loadMutex;
+
+    // Add new members for UI settings
+    int m_titleHeight = 40;
+    int m_maxRows = 4;
+
+    void addDefaultItems();  // Add this declaration
+    
+    // Add helper method declaration for category width calculation
+    qreal categoryContentWidth(const QString& category) const;
+
+    // Add new members for per-category scrolling
+    QMap<QString, qreal> m_categoryContentX;
+    QString m_currentCategory;
+    
+    // Add new helper methods
+    void setCategoryContentX(const QString& category, qreal x);
+    qreal getCategoryContentX(const QString& category) const;
+    void updateCurrentCategory();
+
+    // Add method declaration for index validation
+    void ensureValidIndex(int &index);
+
+    // Add network manager setup method declaration
+    void setupNetworkManager();
+
+    struct CategoryDimensions {
+        int rowHeight;
+        int posterHeight;
+        int posterWidth;
+        qreal itemSpacing;
+    };
+    
+    QMap<QString, CategoryDimensions> m_categoryDimensions;
+    
+    // Helper method to get dimensions for a category
+    CategoryDimensions getDimensionsForCategory(const QString& category) const {
+        return m_categoryDimensions.value(category, CategoryDimensions{180, 180, 280, 20});
+    }
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
@@ -220,7 +260,18 @@ private:
         QString url;
         QString title;
         QString category;
+        QString description;  // Add additional fields
+        QString id;          // for menu item data
+        QString thumbnailUrl;  // Add this field
+        
+        bool operator==(const ImageData& other) const {
+            return url == other.url && 
+                   title == other.title && 
+                   category == other.category && 
+                   id == other.id;
+        }
     };
+
     QVector<ImageData> m_imageData;
 
     // Organize all node creation methods together in one place
@@ -229,6 +280,16 @@ private:
     QSGGeometryNode* createOptimizedTextNode(const QString &text, const QRectF &rect);
     void addSelectionEffects(QSGNode* container, const QRectF& rect);
     void addTitleOverlay(QSGNode* container, const QRectF& rect, const QString& title);
+
+    // Add new method declarations
+    void loadUISettings();
+
+    // Add the declaration for calculateItemVerticalPosition
+    qreal calculateItemVerticalPosition(int index);
+
+private slots:
+    void onNetworkReplyFinished();
+    void onNetworkError(QNetworkReply::NetworkError code);
 };
 
 #endif // CUSTOMIMAGELISTVIEW_H

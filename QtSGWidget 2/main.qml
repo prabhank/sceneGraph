@@ -6,20 +6,14 @@ Window {
     visible: true
     width: 1280
     height: 720
-    color: "black"  // Add this to see the window background
-    title: qsTr("Custom Rectangle Example")
+    color: "black"
+    title: qsTr("Menu Gallery View")
 
     CustomImageListView {
         id: imageListView
         anchors.fill: parent
-        itemWidth: 200
-        itemHeight: 200
-        spacing: 20
-        rowSpacing: 40
+        jsonSource: "qrc:/data/embeddedHubMenu.json"  // Fixed filename from Hyb to Hub
         focus: true
         clip: true
-        
-        // Update JSON source path
-        jsonSource: "qrc:/data/images.json"
     }
 }

@@ -1,5 +1,6 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QCoreApplication>
 #include "customrectangle.h"
 #include "customlistview.h"
 #include "customimagelistview.h"
@@ -8,11 +9,16 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
-
+    
     // Initialize resources
     Q_INIT_RESOURCE(resources);
     Q_INIT_RESOURCE(qml);
 
+    // Verify resources are loaded
+    if (!ResourceVerifier::verifyResources()) {
+        qWarning() << "Failed to verify resources!";
+    }
+    
     // Register types
     qmlRegisterType<CustomRectangle>("Custom", 1, 0, "CustomRectangle");
     qmlRegisterType<CustomListView>("Custom", 1, 0, "CustomListView");
