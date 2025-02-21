@@ -79,6 +79,23 @@ qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
+# Network and SSL configuration
+DEFINES -= QT_NO_SSL
+DEFINES += QT_NETWORK_LIB
+
+unix {
+    CONFIG += link_pkgconfig
+    packagesExist(openssl) {
+        PKGCONFIG += openssl
+        DEFINES += HAVE_OPENSSL
+    }
+}
+
+linux-rasp-pi-* {
+    DEFINES += RASPBERRY_PI
+    LIBS += -lssl -lcrypto
+}
+
 # Network configuration
 DEFINES += QT_NETWORK_LIB
 DEFINES += QT_NO_SSL=0

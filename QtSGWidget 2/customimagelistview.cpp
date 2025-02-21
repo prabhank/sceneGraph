@@ -30,6 +30,8 @@
 #include <QSslSocket>
 #include <QtNetwork/QSslConfiguration>
 
+//Q_LOGGING_CATEGORY(ihScheduleModel2, "custom", QtDebugMsg)
+
 CustomImageListView::CustomImageListView(QQuickItem *parent)
     : QQuickItem(parent)
     , m_networkManager(new QNetworkAccessManager(this))
@@ -61,6 +63,9 @@ CustomImageListView::CustomImageListView(QQuickItem *parent)
             }, Qt::DirectConnection);
         }
     });
+    
+    // Initialize animation system
+    setupScrollAnimation();
 }
 
 void CustomImageListView::componentComplete()
@@ -103,7 +108,7 @@ void CustomImageListView::loadAllImages()
         return;
     }
 
-    // Calculate layout
+    // Calculate layout with reduced spacing
     qreal currentY = 0;
     int totalItems = 0;
 
@@ -117,13 +122,13 @@ void CustomImageListView::loadAllImages()
             }
         }
         
-        // Add category title height
-        currentY += 40; // Title height
+        // Add category title height with reduced spacing
+        currentY += m_titleHeight; // Using reduced title height
         
         // Add height for all items in category
         currentY += itemsInCategory * (m_itemHeight + m_spacing);
         
-        // Add spacing between categories
+        // Add reduced spacing between categories
         currentY += m_rowSpacing;
     }
 
@@ -155,6 +160,12 @@ CustomImageListView::~CustomImageListView()
     
     // Safely cleanup nodes
     safeReleaseTextures();
+    
+    // Cleanup animations
+    stopCurrentAnimation();
+    qDeleteAll(m_categoryAnimations);
+    m_categoryAnimations.clear();
+    delete m_scrollAnimation;
 }
 
 void CustomImageListView::safeReleaseTextures()
@@ -298,26 +309,40 @@ QImage CustomImageListView::loadLocalImage(int index) const
     return fallback;
 }
 
-QSGGeometryNode* CustomImageListView::createTexturedRect(const QRectF &rect, QSGTexture *texture)
+QSGGeometryNode* CustomImageListView::createTexturedRect(const QRectF &rect, QSGTexture *texture, bool isFocused)
 {
+    // Calculate scale factor for focus effect
+    const float scaleFactor = isFocused ? 1.1f : 1.0f;  // 10% larger when focused
+    
+    // Calculate scaled dimensions and center position
+    QRectF scaledRect = rect;
+    if (isFocused) {
+        qreal widthDiff = rect.width() * (scaleFactor - 1.0f);
+        qreal heightDiff = rect.height() * (scaleFactor - 1.0f);
+        scaledRect = QRectF(
+            rect.x() - widthDiff / 2,
+            rect.y() - heightDiff / 2,
+            rect.width() * scaleFactor,
+            rect.height() * scaleFactor
+        );
+    }
+
     // Create geometry for a textured rectangle
     QSGGeometry *geometry = new QSGGeometry(QSGGeometry::defaultAttributes_TexturedPoint2D(), 4);
     geometry->setDrawingMode(GL_TRIANGLE_STRIP);
 
     QSGGeometry::TexturedPoint2D *vertices = geometry->vertexDataAsTexturedPoint2D();
     
-    // Set vertex positions
-    vertices[0].set(rect.left(), rect.top(), 0.0f, 0.0f);
-    vertices[1].set(rect.right(), rect.top(), 1.0f, 0.0f);
-    vertices[2].set(rect.left(), rect.bottom(), 0.0f, 1.0f);
-    vertices[3].set(rect.right(), rect.bottom(), 1.0f, 1.0f);
+    // Set vertex positions using scaled rect
+    vertices[0].set(scaledRect.left(), scaledRect.top(), 0.0f, 0.0f);
+    vertices[1].set(scaledRect.right(), scaledRect.top(), 1.0f, 0.0f);
+    vertices[2].set(scaledRect.left(), scaledRect.bottom(), 0.0f, 1.0f);
+    vertices[3].set(scaledRect.right(), scaledRect.bottom(), 1.0f, 1.0f);
 
-    // Create node with geometry
     QSGGeometryNode *node = new QSGGeometryNode;
     node->setGeometry(geometry);
     node->setFlag(QSGNode::OwnsGeometry);
 
-    // Setup material
     QSGOpaqueTextureMaterial *material = new QSGOpaqueTextureMaterial;
     material->setTexture(texture);
     
@@ -373,19 +398,22 @@ void CustomImageListView::loadImage(int index)
     const ImageData &imgData = m_imageData[index];
     QString imagePath = imgData.url;
 
-    // Convert data/images path to correct resource path
-    if (imagePath.contains("data/images")) {
-        imagePath.replace("data/images", "images");
-    }
-    
-    // Handle resource paths
-    if (imagePath.startsWith(":/data/")) {
-        imagePath.replace(":/data/", ":/");
-    }
-
+    // First try to load as local resource
     QImage image = loadLocalImageFromPath(imagePath);
     if (!image.isNull()) {
         processLoadedImage(index, image);
+        m_isLoading = false;
+        return;
+    }
+
+    // If not a local resource, try as network URL
+    QUrl url(imagePath);
+    if (url.scheme().startsWith("http") || imagePath.startsWith("//")) {
+        // Convert // URLs to http://
+        if (imagePath.startsWith("//")) {
+            url = QUrl("http:" + imagePath);
+        }
+        loadUrlImage(index, url);
     } else {
         createFallbackTexture(index);
     }
@@ -446,97 +474,56 @@ QImage CustomImageListView::loadLocalImageFromPath(const QString &path) const
 // Update loadUrlImage method to better handle HTTP requests
 void CustomImageListView::loadUrlImage(int index, const QUrl &url)
 {
-    // Handle resource URLs separately
-    if (url.scheme() == "qrc" || url.scheme().isEmpty()) {
-        QString path;
-        if (url.scheme().isEmpty()) {
-            path = QString(":/data/images/%1").arg(url.path());
-        } else {
-            path = ":" + url.path();
-        }
-        
-        QImage image = loadLocalImageFromPath(path);
-        if (!image.isNull()) {
-            processLoadedImage(index, image);
-            return;
-        }
-    }
-
-    // Check cache first
-    if (m_urlImageCache.contains(url)) {
-        processLoadedImage(index, m_urlImageCache[url]);
+    if (!url.isValid()) {
+        qWarning() << "Invalid URL:" << url.toString();
+        createFallbackTexture(index);
         return;
     }
 
-    if (url.scheme().startsWith("http")) {
-        // Cancel existing request if any
+    // Convert URL if needed (for URLs starting with //)
+    QUrl finalUrl = url;
+    if (url.toString().startsWith("//")) {
+        finalUrl = QUrl("http:" + url.toString());
+    }
+
+    // For HTTP URLs
+    if (finalUrl.scheme() == "http") {
+        qDebug() << "Loading image" << index << "from URL:" << finalUrl.toString();
+        
+        // Create network request
+        QNetworkRequest request(finalUrl);
+        
+        // Essential headers for Qt 5.6
+        request.setRawHeader("User-Agent", "Mozilla/5.0 (compatible; Qt/5.6)");
+        request.setRawHeader("Accept", "image/webp,image/apng,image/*,*/*;q=0.8");
+        request.setRawHeader("Connection", "keep-alive");
+        
+        // Enable redirect following
+        request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+        request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+        
+        // Cancel any existing request
         if (m_pendingRequests.contains(index)) {
             m_pendingRequests[index]->abort();
             m_pendingRequests[index]->deleteLater();
             m_pendingRequests.remove(index);
         }
 
-        // Create request with headers for Qt 5.6
-        QNetworkRequest request(url);
-        request.setRawHeader("User-Agent", "Mozilla/5.0 (Qt/5.6) CustomImageListView/1.0");
-        request.setRawHeader("Accept", "*/*");
-        
-        // Add SSL configuration if needed
-        if (url.scheme() == "https") {
-            request.setRawHeader("Connection", "keep-alive");
-            request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
-        }
-        
+        // Create and store network reply
         QNetworkReply *reply = m_networkManager->get(request);
         m_pendingRequests[index] = reply;
-
-        // Use old-style connects for Qt 5.6
-        connect(reply, SIGNAL(finished()), 
-                this, SLOT(onNetworkReplyFinished()));
+        
+        // Connect signals with Qt 5.6 compatible syntax
+        connect(reply, SIGNAL(finished()), this, SLOT(onNetworkReplyFinished()));
         connect(reply, SIGNAL(error(QNetworkReply::NetworkError)), 
                 this, SLOT(onNetworkError(QNetworkReply::NetworkError)));
-                
-        // Add timeout
-        QTimer::singleShot(5000, reply, SLOT(abort()));
-    }
-}
-
-void CustomImageListView::onNetworkReplyFinished()
-{
-    QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
-    if (!reply) return;
-
-    int index = m_pendingRequests.key(reply, -1);
-    if (index == -1) {
-        reply->deleteLater();
-        return;
-    }
-
-    if (reply->error() == QNetworkReply::NoError) {
-        QImage image;
-        if (image.loadFromData(reply->readAll())) {
-            m_urlImageCache.insert(reply->url(), image);
-            processLoadedImage(index, image);
-        } else {
-            createFallbackTexture(index);
-        }
+        connect(reply, SIGNAL(sslErrors(QList<QSslError>)), 
+                reply, SLOT(ignoreSslErrors()));
+        
+        // Add longer timeout for slower connections
+        QTimer::singleShot(30000, reply, SLOT(abort()));
     } else {
-        qWarning() << "Network error:" << reply->errorString();
-        createFallbackTexture(index);
-    }
-
-    m_pendingRequests.remove(index);
-    reply->deleteLater();
-}
-
-void CustomImageListView::onNetworkError(QNetworkReply::NetworkError code)
-{
-    QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
-    if (!reply) return;
-
-    int index = m_pendingRequests.key(reply, -1);
-    if (index != -1) {
-        qWarning() << "Network error for image" << index << ":" << code;
+        qWarning() << "Unsupported URL scheme:" << finalUrl.scheme();
         createFallbackTexture(index);
     }
 }
@@ -722,13 +709,13 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
         QFontMetrics fm(titleFont);
         int titleWidth = fm.width(categoryName) + 20;  // Add 20px padding
         
-        // Use category-specific dimensions for layout
-        QRectF titleRect(0, currentY, titleWidth, m_titleHeight);
+        // Add 10-pixel offset for row title (increased from 5)
+        QRectF titleRect(10, currentY, titleWidth, m_titleHeight);  // Changed from 5 to 10
         QSGGeometryNode *titleNode = createRowTitleNode(categoryName, titleRect);
         if (titleNode) {
             parentNode->appendChildNode(titleNode);
         }
-        currentY += m_titleHeight;
+        currentY += m_titleHeight + 10; // Changed from 5 to 10 for more spacing after title
         
         // Calculate items in this category
         QVector<ImageData> categoryItems;
@@ -738,8 +725,8 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
             }
         }
 
-        // Add items using category-specific dimensions
-        qreal xPos = -getCategoryContentX(categoryName);
+        // Add items using category-specific dimensions with 10-pixel offset (increased from 5)
+        qreal xPos = 10 - getCategoryContentX(categoryName);  // Changed from 5 to 10
         for (const ImageData &imgData : categoryItems) {
             if (currentImageIndex < m_count) {
                 QRectF rect(xPos, currentY, dims.posterWidth, dims.posterHeight);
@@ -747,9 +734,14 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
                 // Create item container
                 QSGNode* itemContainer = new QSGNode;
 
-                // Add image
+                // Add image with focus effect
                 if (m_nodes.contains(currentImageIndex) && m_nodes[currentImageIndex].texture) {
-                    QSGGeometryNode *imageNode = createTexturedRect(rect, m_nodes[currentImageIndex].texture);
+                    bool isFocused = (currentImageIndex == m_currentIndex);
+                    QSGGeometryNode *imageNode = createTexturedRect(
+                        rect, 
+                        m_nodes[currentImageIndex].texture,
+                        isFocused
+                    );
                     if (imageNode) {
                         itemContainer->appendChildNode(imageNode);
                         m_nodes[currentImageIndex].node = imageNode;
@@ -780,27 +772,55 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
 // Helper method for selection effects
 void CustomImageListView::addSelectionEffects(QSGNode* container, const QRectF& rect)
 {
-    // Add glow effect
-    QSGGeometryNode *glowNode = new QSGGeometryNode;
-    QSGGeometry *glowGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 4);
-    glowGeometry->setDrawingMode(GL_TRIANGLE_STRIP);
+    // Calculate scaled dimensions for focus border to match zoomed asset
+    const float scaleFactor = 1.1f;  // Match the zoom factor from createTexturedRect
+    qreal widthDiff = rect.width() * (scaleFactor - 1.0f);
+    qreal heightDiff = rect.height() * (scaleFactor - 1.0f);
     
-    QRectF glowRect = rect.adjusted(-2, -2, 2, 2);
-    QSGGeometry::Point2D *glowVertices = glowGeometry->vertexDataAsPoint2D();
-    glowVertices[0].set(glowRect.left(), glowRect.top());
-    glowVertices[1].set(glowRect.right(), glowRect.top());
-    glowVertices[2].set(glowRect.left(), glowRect.bottom());
-    glowVertices[3].set(glowRect.right(), glowRect.bottom());
+    QRectF scaledRect(
+        rect.x() - widthDiff / 2,
+        rect.y() - heightDiff / 2,
+        rect.width() * scaleFactor,
+        rect.height() * scaleFactor
+    );
     
-    glowNode->setGeometry(glowGeometry);
-    glowNode->setFlag(QSGNode::OwnsGeometry);
+    // Create white border effect
+    QSGGeometryNode *borderNode = new QSGGeometryNode;
     
-    QSGFlatColorMaterial *glowMaterial = new QSGFlatColorMaterial;
-    glowMaterial->setColor(QColor(0, 120, 215, hasActiveFocus() ? 180 : 100));
-    glowNode->setMaterial(glowMaterial);
-    glowNode->setFlag(QSGNode::OwnsMaterial);
+    // Create geometry for border (4 lines forming a rectangle)
+    QSGGeometry *borderGeometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 8);
+    borderGeometry->setDrawingMode(GL_LINES);
+    borderGeometry->setLineWidth(2); // Border width
     
-    container->appendChildNode(glowNode);
+    QSGGeometry::Point2D *vertices = borderGeometry->vertexDataAsPoint2D();
+    
+    // Top line
+    vertices[0].set(scaledRect.left(), scaledRect.top());
+    vertices[1].set(scaledRect.right(), scaledRect.top());
+    
+    // Right line
+    vertices[2].set(scaledRect.right(), scaledRect.top());
+    vertices[3].set(scaledRect.right(), scaledRect.bottom());
+    
+    // Bottom line
+    vertices[4].set(scaledRect.right(), scaledRect.bottom());
+    vertices[5].set(scaledRect.left(), scaledRect.bottom());
+    
+    // Left line
+    vertices[6].set(scaledRect.left(), scaledRect.bottom());
+    vertices[7].set(scaledRect.left(), scaledRect.top());
+    
+    borderNode->setGeometry(borderGeometry);
+    borderNode->setFlag(QSGNode::OwnsGeometry);
+    
+    // Create white material for border
+    QSGFlatColorMaterial *borderMaterial = new QSGFlatColorMaterial;
+    borderMaterial->setColor(QColor(Qt::white));
+    
+    borderNode->setMaterial(borderMaterial);
+    borderNode->setFlag(QSGNode::OwnsMaterial);
+    
+    container->appendChildNode(borderNode);
 }
 
 // Helper method for title overlay
@@ -974,10 +994,48 @@ void CustomImageListView::navigateRight()
         if (m_imageData[nextIndex].category != currentCategory) {
             break;
         }
+        
+        // Get category dimensions and calculate if scrolling is needed
+        CategoryDimensions dims = getDimensionsForCategory(currentCategory);
+        int itemsInCategory = 0;
+        int lastIndexInCategory = nextIndex;
+        
+        // Count items in this category and find last index
+        for (int i = 0; i < m_imageData.size(); i++) {
+            if (m_imageData[i].category == currentCategory) {
+                itemsInCategory++;
+                lastIndexInCategory = i;
+            }
+        }
+        
         setCurrentIndex(nextIndex);
         ensureIndexVisible(nextIndex);
         ensureFocus();
         updateCurrentCategory();
+        
+        // Calculate scroll target position with animation
+        qreal totalWidth = itemsInCategory * dims.posterWidth + 
+                          (itemsInCategory - 1) * dims.itemSpacing;
+                          
+        if (totalWidth > width()) {
+            qreal targetX;
+            if (nextIndex == lastIndexInCategory) {
+                targetX = categoryContentWidth(currentCategory) - width();
+            } else {
+                int itemsBeforeInCategory = 0;
+                for (int i = 0; i < nextIndex; i++) {
+                    if (m_imageData[i].category == currentCategory) {
+                        itemsBeforeInCategory++;
+                    }
+                }
+                targetX = itemsBeforeInCategory * (dims.posterWidth + dims.itemSpacing);
+                targetX = qMax(0.0, targetX - (width() - dims.posterWidth) / 2);
+            }
+            
+            // Animate to target position
+            animateScroll(currentCategory, targetX);
+        }
+        
         update();
         return;
     }
@@ -1153,12 +1211,12 @@ void CustomImageListView::ensureIndexVisible(int index)
     }
 
     QString targetCategory = m_imageData[index].category;
+    CategoryDimensions dims = getDimensionsForCategory(targetCategory);
     
     // Calculate vertical position
     qreal targetY = calculateItemVerticalPosition(index);
     
     // Center vertically with proper offset
-    CategoryDimensions dims = getDimensionsForCategory(targetCategory);
     qreal centerOffset = (height() - dims.posterHeight) / 2;
     qreal newContentY = targetY - centerOffset;
     
@@ -1174,22 +1232,48 @@ void CustomImageListView::ensureIndexVisible(int index)
         }
     }
     
+    // Calculate x position considering item dimensions
     qreal xOffset = itemsBeforeInCategory * (dims.posterWidth + dims.itemSpacing);
+    
+    // Center the item horizontally with proper offset
     qreal targetX = xOffset - (width() - dims.posterWidth) / 2;
-    targetX = qBound(0.0, targetX, qMax(0.0, categoryContentWidth(targetCategory) - width()));
+    
+    // Add extra space to ensure focus border is visible
+    qreal extraSpace = 10; // Pixels for focus border visibility
+    
+    // Calculate maximum scroll considering item width and spacing
+    qreal maxScroll = categoryContentWidth(targetCategory) - width();
+    
+    // Bound the scroll position with extra space consideration
+    targetX = qBound(0.0, targetX, maxScroll + extraSpace);
+    
     setCategoryContentX(targetCategory, targetX);
 }
 
 // Add helper method to calculate category width
 qreal CustomImageListView::categoryContentWidth(const QString& category) const
 {
+    // Get the correct dimensions for this category
+    CategoryDimensions dims = getDimensionsForCategory(category);
+    
+    // Count items in this category
     int itemCount = 0;
     for (const ImageData &imgData : m_imageData) {
         if (imgData.category == category) {
             itemCount++;
         }
     }
-    return itemCount * m_itemWidth + (itemCount - 1) * m_spacing;
+    
+    // Calculate total width using category-specific dimensions
+    qreal totalWidth = itemCount * dims.posterWidth + 
+                       (itemCount - 1) * dims.itemSpacing;
+                       
+    // Only add padding if the content is wider than the view
+    if (totalWidth > width()) {
+        totalWidth += dims.posterWidth * 0.5; // Add half poster width as padding
+    }
+    
+    return totalWidth;
 }
 
 bool CustomImageListView::event(QEvent *e)
@@ -1264,23 +1348,23 @@ qreal CustomImageListView::contentWidth() const
     return m_itemsPerRow * m_itemWidth + (m_itemsPerRow - 1) * m_spacing;
 }
 
+// Update contentHeight calculation for tighter spacing
 qreal CustomImageListView::contentHeight() const
 {
     qreal totalHeight = 0;
     
-    // Add initial padding
-    totalHeight += m_rowSpacing;
+    // Add minimal initial padding
+    totalHeight += m_rowSpacing / 2;  // Reduced padding
     
     for (int categoryIndex = 0; categoryIndex < m_rowTitles.size(); ++categoryIndex) {
-        // Add spacing between categories
+        // Add minimal spacing between categories
         if (categoryIndex > 0) {
-            totalHeight += m_rowSpacing * 2;  // Double spacing between categories
+            totalHeight += m_rowSpacing;  // Reduced from double spacing
         }
 
         // Add category title height
-        totalHeight += 40;  // Title height
+        totalHeight += m_titleHeight;
 
-        // Count images in this category
         QString categoryName = m_rowTitles[categoryIndex];
         int categoryImageCount = 0;
         for (const ImageData &imgData : m_imageData) {
@@ -1295,14 +1379,14 @@ qreal CustomImageListView::contentHeight() const
         // Add height for all rows in this category
         totalHeight += rowsInCategory * m_itemHeight;
         
-        // Add spacing between rows within category
+        // Add minimal spacing between rows within category
         if (rowsInCategory > 1) {
-            totalHeight += (rowsInCategory - 1) * m_rowSpacing;
+            totalHeight += (rowsInCategory - 1) * (m_rowSpacing / 2);  // Reduced internal row spacing
         }
     }
 
-    // Add extra padding at bottom
-    totalHeight += m_rowSpacing * 2;
+    // Add minimal padding at bottom
+    totalHeight += m_rowSpacing / 2;  // Reduced padding
     
     return totalHeight;
 }
@@ -1416,7 +1500,7 @@ void CustomImageListView::loadFromJson(const QUrl &source)
     }
 }
 
-// Update loadUISettings to properly load category dimensions
+// Update loadUISettings method
 void CustomImageListView::loadUISettings()
 {
     QString settingsPath = ":/data/uiSettings.json";
@@ -1436,25 +1520,24 @@ void CustomImageListView::loadUISettings()
             QJsonObject swimlaneConfig = kv3Config["swimlaneSizeConfiguration"].toObject();
             QJsonObject posterWithMetaData = swimlaneConfig["posterWithMetaData"].toObject();
             
-            // Load category-specific dimensions
+            // Load category-specific dimensions with reduced spacing
             if (posterWithMetaData.contains("portraitType1")) {
                 QJsonObject portraitConfig = posterWithMetaData["portraitType1"].toObject();
                 
-                // Store dimensions for Bein Series
                 CategoryDimensions dims;
-                dims.rowHeight = portraitConfig["height"].toInt(284);
-                dims.posterHeight = portraitConfig["posterHeight"].toInt(228);
+                dims.rowHeight = portraitConfig["height"].toInt(240);      // Reduced from 284
+                dims.posterHeight = portraitConfig["posterHeight"].toInt(200); // Reduced from 228
                 dims.posterWidth = portraitConfig["posterWidth"].toInt(152);
-                dims.itemSpacing = portraitConfig["itemSpacing"].toDouble(18.5);
+                dims.itemSpacing = 10;  // Reduced from 15
                 
                 m_categoryDimensions["Bein Series"] = dims;
             }
             
-            // Set default row spacing
-            setRowSpacing(kv3Config["rowSpacing"].toDouble(104));
+            // Set reduced row spacing
+            setRowSpacing(15);  // Reduced from 20
             
-            // Set row title height
-            m_titleHeight = kv3Config["rowTitle"].toObject()["Height"].toInt(42);
+            // Set reduced row title height
+            m_titleHeight = 30; // Reduced from 30
         }
     }
 }
@@ -1646,7 +1729,59 @@ void CustomImageListView::setupNetworkManager()
 {
     if (!m_networkManager) return;
     
-    // Basic initialization is sufficient for Qt 5.6
-    // Network configuration will be set per-request
+    // Configure network manager for Qt 5.6
+    m_networkManager->setConfiguration(QNetworkConfiguration());
+    m_networkManager->setNetworkAccessible(QNetworkAccessManager::Accessible);
+
+    // Enable SSL
+    #ifndef QT_NO_SSL
+        QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
+        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+        sslConfig.setProtocol(QSsl::TlsV1_0);
+        QSslConfiguration::setDefaultConfiguration(sslConfig);
+    #endif
+}
+
+void CustomImageListView::setupScrollAnimation()
+{
+    // Create a reusable animation object
+    m_scrollAnimation = new QPropertyAnimation(this);
+    m_scrollAnimation->setDuration(300);  // 300ms duration
+    m_scrollAnimation->setEasingCurve(QEasingCurve::OutCubic);
+}
+
+void CustomImageListView::animateScroll(const QString& category, qreal targetX)
+{
+    // Stop any existing animation
+    stopCurrentAnimation();
+    
+    // Create a new animation for this category if it doesn't exist
+    if (!m_categoryAnimations.contains(category)) {
+        QPropertyAnimation* anim = new QPropertyAnimation(this);
+        anim->setDuration(300);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        m_categoryAnimations[category] = anim;
+        
+        // Connect animation to update the scroll position
+        connect(anim, &QPropertyAnimation::valueChanged, this, [this, category](const QVariant& value) {
+            setCategoryContentX(category, value.toReal());
+        });
+    }
+    
+    QPropertyAnimation* anim = m_categoryAnimations[category];
+    anim->stop();
+    anim->setStartValue(getCategoryContentX(category));
+    anim->setEndValue(targetX);
+    anim->start();
+}
+
+void CustomImageListView::stopCurrentAnimation()
+{
+    // Stop all category animations
+    for (QPropertyAnimation* anim : m_categoryAnimations.values()) {
+        if (anim->state() == QPropertyAnimation::Running) {
+            anim->stop();
+        }
+    }
 }
 

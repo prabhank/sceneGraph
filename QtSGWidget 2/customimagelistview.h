@@ -7,13 +7,17 @@
 #include <QQmlEngine>
 #include <QNetworkAccessManager>
 #include <QMap>
-#include <QSGGeometryNode>  // Change from forward declaration to full include
+#include <QSGGeometryNode>
+#include <QImage>  // Add this include
 #include "texturebuffer.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QNetworkConfiguration>
+#include <QSslError>
+#include <QPropertyAnimation>  // Add this include
 
 class QSGTexture;
 class QSGGeometry;
@@ -47,8 +51,8 @@ private:
     int m_count = 15;
     qreal m_itemWidth = 200;
     qreal m_itemHeight = 200;
-    qreal m_spacing = 15;
-    qreal m_rowSpacing = 40;
+    qreal m_spacing = 10;          // Reduced from 15 to 10
+    qreal m_rowSpacing = 10;       // Reduced from 20 to 10
     bool m_useLocalImages = false;
     QString m_imagePrefix = "qrc:/images/";
     QVariantList m_imageUrls;
@@ -68,7 +72,7 @@ private:
     QMutex m_loadMutex;
 
     // Add new members for UI settings
-    int m_titleHeight = 40;
+    int m_titleHeight = 25; // Reduced from 30 to 25
     int m_maxRows = 4;
 
     void addDefaultItems();  // Add this declaration
@@ -104,6 +108,15 @@ private:
     CategoryDimensions getDimensionsForCategory(const QString& category) const {
         return m_categoryDimensions.value(category, CategoryDimensions{180, 180, 280, 20});
     }
+
+    // Add new member variables
+    QPropertyAnimation* m_scrollAnimation;
+    QMap<QString, QPropertyAnimation*> m_categoryAnimations;
+    
+    // Add helper method declarations
+    void setupScrollAnimation();
+    void animateScroll(const QString& category, qreal targetX);
+    void stopCurrentAnimation();
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
@@ -275,7 +288,7 @@ private:
     QVector<ImageData> m_imageData;
 
     // Organize all node creation methods together in one place
-    QSGGeometryNode* createTexturedRect(const QRectF &rect, QSGTexture *texture);
+    QSGGeometryNode* createTexturedRect(const QRectF &rect, QSGTexture *texture, bool isFocused = false);
    // QSGGeometryNode* createRowTitleNode(const QString &text, const QRectF &rect);
     QSGGeometryNode* createOptimizedTextNode(const QString &text, const QRectF &rect);
     void addSelectionEffects(QSGNode* container, const QRectF& rect);
@@ -288,8 +301,58 @@ private:
     qreal calculateItemVerticalPosition(int index);
 
 private slots:
-    void onNetworkReplyFinished();
-    void onNetworkError(QNetworkReply::NetworkError code);
+    // Change these from declarations to actual slot definitions
+    void onNetworkReplyFinished() {
+        QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
+        if (!reply) return;
+
+        int index = m_pendingRequests.key(reply, -1);
+        if (index == -1) {
+            reply->deleteLater();
+            return;
+        }
+
+        if (reply->error() == QNetworkReply::NoError) {
+            QByteArray data = reply->readAll();
+            if (!data.isEmpty()) {
+                QImage image;
+                if (image.loadFromData(data)) {
+                    m_urlImageCache.insert(reply->url(), image);
+                    processLoadedImage(index, image);
+                } else {
+                    createFallbackTexture(index);
+                }
+            } else {
+                createFallbackTexture(index);
+            }
+        } else {
+            createFallbackTexture(index);
+        }
+
+        m_pendingRequests.remove(index);
+        reply->deleteLater();
+    }
+
+    void onNetworkError(QNetworkReply::NetworkError code) {
+        QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
+        if (!reply) return;
+
+        int index = m_pendingRequests.key(reply, -1);
+        if (index != -1) {
+            createFallbackTexture(index);
+        }
+    }
+
+    void onDownloadProgress(qint64 bytesReceived, qint64 bytesTotal) {
+        QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
+        if (!reply) return;
+
+        int index = m_pendingRequests.key(reply, -1);
+        if (index != -1) {
+            qDebug() << "Download progress for index" << index << ":"
+                     << bytesReceived << "/" << bytesTotal << "bytes";
+        }
+    }
 };
 
 #endif // CUSTOMIMAGELISTVIEW_H
