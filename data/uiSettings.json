@@ -1,0 +1,37 @@
+{
+  "resourceType": "configuration",
+  "uiConfigurations": {
+    "uiSchema": "productK",
+    "STB": {
+      "kv3": {
+	    "rowSpacing":104,
+		"rowTitle": {
+			"Height": 42,
+			"focusColor": "#ebebeb",
+            "unFocusColor": "#ffffff",
+            "fontFamily": "Roboto"
+		},
+        "swimlaneSizeConfiguration": {
+          "poster": {
+            "default": { "height": 135, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 24 },
+            "landscapeType1": { "height": 135, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 24 },
+            "landscapeType2": { "height": 135, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 24 },
+            "portraitType1": { "height": 228, "posterHeight": 228, "posterWidth": 152, "itemSpacing": 24 },
+            "heroBanner": { "height": 252, "posterHeight": 252, "posterWidth": 448, "itemSpacing": 24 },
+            "settings": { "height": 112, "posterHeight": 112, "posterWidth": 272, "itemSpacing": 8 },
+            "landScapeTypeChannelInfo": { "height": 135, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 24 }
+          },
+          "posterWithMetaData": {
+            "default": { "height": 192, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 16 },
+            "landscapeType1": { "height": 192, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 16 },
+            "landscapeType2": { "height": 240, "posterHeight": 0, "posterWidth": 0, "itemSpacing": 6 },
+            "portraitType1": { "height": 284, "posterHeight": 228, "posterWidth": 152, "itemSpacing": 18.5 },
+            "heroBanner": { "height": 330, "posterHeight": 252, "posterWidth": 448, "itemSpacing": 6 },
+            "settings": { "height": 112, "posterHeight": 112, "posterWidth": 272, "itemSpacing": 8 },
+            "landScapeTypeChannelInfo": { "height": 192, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 16 }
+          }
+        }
+      }
+    }
+  }
+}

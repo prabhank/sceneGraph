@@ -1,0 +1,192 @@
+{
+    "categories": [
+        {
+            "name": "Action Movies",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Fast Chase"
+                },
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Mission Critical"
+                },
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "High Speed"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Urban Combat"
+                },
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Last Stand"
+                }
+            ]
+        },
+        {
+            "name": "Comedy",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Laugh Out Loud"
+                },
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "Comedy Club"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Funny Days"
+                },
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Happy Hours"
+                }
+            ]
+        },
+        {
+            "name": "Drama",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Life Story"
+                },
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Family Tale"
+                },
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "The Journey"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Heart & Soul"
+                },
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Deep Waters"
+                }
+            ]
+        },
+        {
+            "name": "Sci-Fi",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "Space Adventure"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Time Machine"
+                },
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Future World"
+                },
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Alien Contact"
+                },
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Robot Wars"
+                }
+            ]
+        },
+        {
+            "name": "Documentary",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Wild Nature"
+                },
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Ocean Life"
+                },
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Space Exploration"
+                },
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Ancient History"
+                }
+            ]
+        },
+        {
+            "name": "Animation",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Magic World"
+                },
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Adventure Time"
+                },
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Fantasy Land"
+                },
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "Dragon Tales"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Animal Friends"
+                }
+            ]
+        },
+        {
+            "name": "Horror",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Dark Night"
+                },
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "The Haunting"
+                },
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "Shadow House"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Mystery Woods"
+                }
+            ]
+        },
+        {
+            "name": "Adventure",
+            "images": [
+                {
+                    "url": "qrc:/data/images/img2.jpg",
+                    "title": "Lost World"
+                },
+                {
+                    "url": "qrc:/data/images/img3.jpg",
+                    "title": "Treasure Hunt"
+                },
+                {
+                    "url": "qrc:/data/images/img4.jpg",
+                    "title": "Mountain Quest"
+                },
+                {
+                    "url": "qrc:/data/images/img5.jpg",
+                    "title": "Ocean Adventure"
+                },
+                {
+                    "url": "qrc:/data/images/img1.jpg",
+                    "title": "Desert Journey"
+                }
+            ]
+        }
+    ]
+}

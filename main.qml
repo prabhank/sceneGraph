@@ -1,0 +1,48 @@
+import QtQuick 2.5
+import QtQuick.Window 2.2
+import Custom 1.0
+
+Window {
+    visible: true
+    width: 1280
+    height: 720
+    color: "black"
+    title: qsTr("Menu Gallery View")
+
+    CustomImageListView {
+        id: imageListView
+        anchors.fill: parent
+        jsonSource: "qrc:/data/embeddedHubMenu.json"
+        focus: true
+        clip: true
+
+        onLinkActivated: function(action, url) {
+            console.log("Link activated - Action:", action, "URL:", url)
+            
+            switch(action) {
+                case "OK":
+                    console.log("Processing OK action with URL:", url)
+                    // Add your content playback logic here
+                    break
+                    
+                case "info":
+                    console.log("Processing info action with URL:", url)
+                    // Add your info display logic here
+                    break
+                    
+                default:
+                    console.log("Unknown action type:", action)
+                    break
+            }
+        }
+        
+        // Add focus handling
+        onFocusChanged: {
+            if (focus) {
+                console.log("CustomImageListView gained focus")
+            } else {
+                console.log("CustomImageListView lost focus")
+            }
+        }
+    }
+}
