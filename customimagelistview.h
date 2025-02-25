@@ -8,7 +8,7 @@
 #include <QNetworkAccessManager>
 #include <QMap>
 #include <QSGGeometryNode>
-#include <QImage>  // Add this include
+#include <QImage>
 #include "texturebuffer.h"
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -17,7 +17,7 @@
 #include <QNetworkRequest>
 #include <QNetworkConfiguration>
 #include <QSslError>
-#include <QPropertyAnimation>  // Add this include
+#include <QPropertyAnimation>
 
 class QSGTexture;
 class QSGGeometry;
@@ -203,6 +203,7 @@ signals:
     void jsonSourceChanged();
     void linkActivated(const QString& action, const QString& url);  // Add this signal
     void startPositionXChanged();
+    void moodImageSelected(const QString& url);  // Add this new signal
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;

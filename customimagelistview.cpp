@@ -936,6 +936,15 @@ void CustomImageListView::setCurrentIndex(int index)
     if (m_currentIndex != index && index >= 0 && index < m_count) {
         m_currentIndex = index;
         updateCurrentCategory();
+        
+        // Emit moodImageUri when focus changes
+        if (index < m_imageData.size()) {
+            const ImageData &currentItem = m_imageData[index];
+            if (!currentItem.url.isEmpty()) {
+                emit moodImageSelected(currentItem.url);
+            }
+        }
+        
         emit currentIndexChanged();
         update();
     }

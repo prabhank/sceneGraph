@@ -36,6 +36,11 @@ Window {
                     break
             }
         }
+
+        onMoodImageSelected: function(url) {
+            console.log("Mood image URL:", url)
+            // Handle the mood image URL here
+        }
         
         // Add focus handling
         onFocusChanged: {
