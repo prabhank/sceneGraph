@@ -44,10 +44,12 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(qreal rowSpacing READ rowSpacing WRITE setRowSpacing NOTIFY rowSpacingChanged)
     Q_PROPERTY(QStringList rowTitles READ rowTitles WRITE setRowTitles NOTIFY rowTitlesChanged)
     Q_PROPERTY(QUrl jsonSource READ jsonSource WRITE setJsonSource NOTIFY jsonSourceChanged)
+    Q_PROPERTY(qreal startPositionX READ startPositionX WRITE setStartPositionX NOTIFY startPositionXChanged)
 
 private:
     // Add the network manager to private member variables section
     QNetworkAccessManager* m_networkManager = nullptr;
+    qreal m_startPositionX = 0;  // Add this line for the start position
     int m_count = 15;
     qreal m_itemWidth = 200;
     qreal m_itemHeight = 200;
@@ -176,6 +178,9 @@ public:
     QUrl jsonSource() const { return m_jsonSource; }
     void setJsonSource(const QUrl &source);
 
+    qreal startPositionX() const { return m_startPositionX; }
+    void setStartPositionX(qreal x);
+
 signals:
     void countChanged();
     void itemWidthChanged();
@@ -197,6 +202,7 @@ signals:
     void rowTitlesChanged();
     void jsonSourceChanged();
     void linkActivated(const QString& action, const QString& url);  // Add this signal
+    void startPositionXChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;

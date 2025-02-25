@@ -15,6 +15,7 @@ Window {
         jsonSource: "qrc:/data/embeddedHubMenu.json"
         focus: true
         clip: true
+        startPositionX: 50  // Specify the starting X position here (e.g., 50 pixels)
 
         onLinkActivated: function(action, url) {
             console.log("Link activated - Action:", action, "URL:", url)

@@ -709,8 +709,8 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
         QFontMetrics fm(titleFont);
         int titleWidth = fm.width(categoryName) + 20;  // Add 20px padding
         
-        // Add 10-pixel offset for row title (increased from 5)
-        QRectF titleRect(10, currentY, titleWidth, m_titleHeight);  // Changed from 5 to 10
+        // Add startPositionX to title position
+        QRectF titleRect(m_startPositionX + 10, currentY, titleWidth, m_titleHeight);  // Changed from 5 to 10
         QSGGeometryNode *titleNode = createRowTitleNode(categoryName, titleRect);
         if (titleNode) {
             parentNode->appendChildNode(titleNode);
@@ -726,7 +726,7 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
         }
 
         // Add items using category-specific dimensions with 10-pixel offset (increased from 5)
-        qreal xPos = 10 - getCategoryContentX(categoryName);  // Changed from 5 to 10
+        qreal xPos = m_startPositionX + 10 - getCategoryContentX(categoryName);  // Changed from 5 to 10
         for (const ImageData &imgData : categoryItems) {
             if (currentImageIndex < m_count) {
                 QRectF rect(xPos, currentY, dims.posterWidth, dims.posterHeight);
@@ -1838,6 +1838,15 @@ void CustomImageListView::stopCurrentAnimation()
         if (anim->state() == QPropertyAnimation::Running) {
             anim->stop();
         }
+    }
+}
+
+void CustomImageListView::setStartPositionX(qreal x)
+{
+    if (m_startPositionX != x) {
+        m_startPositionX = x;
+        emit startPositionXChanged();
+        update();
     }
 }
 
