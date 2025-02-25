@@ -47,8 +47,27 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(qreal startPositionX READ startPositionX WRITE setStartPositionX NOTIFY startPositionXChanged)
 
 private:
-    // Add the network manager to private member variables section
+    // Move ImageData struct definition to the top of the private section
+    struct ImageData {
+        QString url;
+        QString title;
+        QString category;
+        QString description;
+        QString id;
+        QString thumbnailUrl;
+        QMap<QString, QString> links;
+        
+        bool operator==(const ImageData& other) const {
+            return url == other.url && 
+                   title == other.title && 
+                   category == other.category && 
+                   id == other.id;
+        }
+    };
+
+    // Now we can use ImageData in member variables
     QNetworkAccessManager* m_networkManager = nullptr;
+    QVector<ImageData> m_imageData;
     qreal m_startPositionX = 0;  // Add this line for the start position
     int m_count = 15;
     qreal m_itemWidth = 200;
@@ -119,6 +138,9 @@ private:
     void setupScrollAnimation();
     void animateScroll(const QString& category, qreal targetX);
     void stopCurrentAnimation();
+
+    // Add member to store complete JSON document
+    QJsonObject m_parsedJson;  // Add this line
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
@@ -204,6 +226,7 @@ signals:
     void linkActivated(const QString& action, const QString& url);  // Add this signal
     void startPositionXChanged();
     void moodImageSelected(const QString& url);  // Add this new signal
+    void assetFocused(const QJsonObject& assetData);  // Modified to pass complete JSON object
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;
@@ -277,24 +300,8 @@ private:
 
     void loadFromJson(const QUrl &source);
     void processJsonData(const QByteArray &data);
-    struct ImageData {
-        QString url;
-        QString title;
-        QString category;
-        QString description;  // Add additional fields
-        QString id;          // for menu item data
-        QString thumbnailUrl;  // Add this field
-        QMap<QString, QString> links;  // Add this to store action links (OK, info, etc)
-        
-        bool operator==(const ImageData& other) const {
-            return url == other.url && 
-                   title == other.title && 
-                   category == other.category && 
-                   id == other.id;
-        }
-    };
 
-    QVector<ImageData> m_imageData;
+    //QVector<ImageData> m_imageData;
 
     // Organize all node creation methods together in one place
     QSGGeometryNode* createTexturedRect(const QRectF &rect, QSGTexture *texture, bool isFocused = false);

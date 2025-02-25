@@ -50,5 +50,10 @@ Window {
                 console.log("CustomImageListView lost focus")
             }
         }
+
+        onAssetFocused: function(assetData) {
+            console.log("Asset focused, complete data:", JSON.stringify(assetData, null, 2))
+            // Now you have access to all JSON fields exactly as they were in the source
+        }
     }
 }

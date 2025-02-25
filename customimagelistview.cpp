@@ -937,11 +937,21 @@ void CustomImageListView::setCurrentIndex(int index)
         m_currentIndex = index;
         updateCurrentCategory();
         
-        // Emit moodImageUri when focus changes
+        // Emit full JSON data when focus changes
         if (index < m_imageData.size()) {
             const ImageData &currentItem = m_imageData[index];
-            if (!currentItem.url.isEmpty()) {
-                emit moodImageSelected(currentItem.url);
+            
+            // Find original JSON object
+            QJsonArray items = m_parsedJson["menuItems"].toObject()["items"].toArray();
+            for (const QJsonValue &rowVal : items) {
+                QJsonArray rowItems = rowVal.toObject()["items"].toArray();
+                for (const QJsonValue &itemVal : rowItems) {
+                    QJsonObject item = itemVal.toObject();
+                    if (item["title"].toString() == currentItem.title) {
+                        emit assetFocused(item);
+                        break;
+                    }
+                }
             }
         }
         
@@ -1595,10 +1605,10 @@ void CustomImageListView::processJsonData(const QByteArray &data)
         return;
     }
 
-    QJsonObject root = doc.object();
+    m_parsedJson = doc.object();  // Store the complete JSON object
     
     // Get menuItems object first
-    QJsonObject menuItems = root["menuItems"].toObject();
+    QJsonObject menuItems = m_parsedJson["menuItems"].toObject();
     if (menuItems.isEmpty()) {
         qWarning() << "menuItems object is empty or invalid";
         return;
