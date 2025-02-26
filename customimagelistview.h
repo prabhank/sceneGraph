@@ -141,46 +141,46 @@ private:
         return total;
     }
 
-    // Add helper method to collect textures
-    void collectTextures(QSGNode *node, std::unordered_set<QSGTexture *> &textures) {
-        if (!node) return;
+    // // Add helper method to collect textures
+    // void collectTextures(QSGNode *node, std::unordered_set<QSGTexture *> &textures) {
+    //     if (!node) return;
 
-        // Check geometry node materials
-        if (node->type() == QSGNode::GeometryNodeType) {
-            QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
-            QSGMaterial *mat = geometryNode->activeMaterial();
-            if (mat) {
-                // QSGTextureMaterial
-                if (auto texMat = dynamic_cast<QSGTextureMaterial *>(mat)) {
-                    if (texMat->texture())
-                        textures.insert(texMat->texture());
-                }
-                // QSGOpaqueTextureMaterial
-                if (auto opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial *>(mat)) {
-                    if (opaqueTexMat->texture())
-                        textures.insert(opaqueTexMat->texture());
-                }
-            }
-        }
+    //     // Check geometry node materials
+    //     if (node->type() == QSGNode::GeometryNodeType) {
+    //         QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
+    //         QSGMaterial *mat = geometryNode->activeMaterial();
+    //         if (mat) {
+    //             // QSGTextureMaterial
+    //             if (auto texMat = dynamic_cast<QSGTextureMaterial *>(mat)) {
+    //                 if (texMat->texture())
+    //                     textures.insert(texMat->texture());
+    //             }
+    //             // QSGOpaqueTextureMaterial
+    //             if (auto opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial *>(mat)) {
+    //                 if (opaqueTexMat->texture())
+    //                     textures.insert(opaqueTexMat->texture());
+    //             }
+    //         }
+    //     }
 
-        // Check QSGSimpleTextureNode
-        if (auto simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node)) {
-            if (simpleTex->texture())
-                textures.insert(simpleTex->texture());
-        }
+    //     // Check QSGSimpleTextureNode
+    //     if (auto simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node)) {
+    //         if (simpleTex->texture())
+    //             textures.insert(simpleTex->texture());
+    //     }
 
-        // Recurse through children
-        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
-            collectTextures(child, textures);
-        }
-    }
+    //     // Recurse through children
+    //     for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
+    //         collectTextures(child, textures);
+    //     }
+    // }
 
-    // Add helper method to count total textures
-    int countTotalTextures(QSGNode *root) {
-        std::unordered_set<QSGTexture *> textures;
-        collectTextures(root, textures);
-        return textures.size();
-    }
+    // // Add helper method to count total textures
+    // int countTotalTextures(QSGNode *root) {
+    //     std::unordered_set<QSGTexture *> textures;
+    //     collectTextures(root, textures);
+    //     return textures.size();
+    // }
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
