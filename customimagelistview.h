@@ -9,6 +9,10 @@
 #include <QMap>
 #include <QSGGeometryNode>
 #include <QImage>  // Add this include
+#include <QSGSimpleTextureNode>
+#include <QSGTextureMaterial>
+#include <QSGOpaqueTextureMaterial>
+#include <QSGFlatColorMaterial>
 #include "texturebuffer.h"
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -20,6 +24,7 @@
 #include <QPropertyAnimation>  // Add this include
 #include <QElapsedTimer>  // Add this include
 #include <QVector>  // Add this include
+#include <QSet>  // Add this include
 
 class QSGTexture;
 class QSGGeometry;
@@ -141,46 +146,46 @@ private:
         return total;
     }
 
-    // // Add helper method to collect textures
-    // void collectTextures(QSGNode *node, std::unordered_set<QSGTexture *> &textures) {
-    //     if (!node) return;
+    // Modified version using QSet instead of std::unordered_set
+    void collectTextures(QSGNode *node, QSet<QSGTexture *> &textures) {
+        if (!node) return;
 
-    //     // Check geometry node materials
-    //     if (node->type() == QSGNode::GeometryNodeType) {
-    //         QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
-    //         QSGMaterial *mat = geometryNode->activeMaterial();
-    //         if (mat) {
-    //             // QSGTextureMaterial
-    //             if (auto texMat = dynamic_cast<QSGTextureMaterial *>(mat)) {
-    //                 if (texMat->texture())
-    //                     textures.insert(texMat->texture());
-    //             }
-    //             // QSGOpaqueTextureMaterial
-    //             if (auto opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial *>(mat)) {
-    //                 if (opaqueTexMat->texture())
-    //                     textures.insert(opaqueTexMat->texture());
-    //             }
-    //         }
-    //     }
+        // Check geometry node materials
+        if (node->type() == QSGNode::GeometryNodeType) {
+            QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
+            QSGMaterial *mat = geometryNode->activeMaterial();
+            if (mat) {
+                // QSGTextureMaterial
+                QSGTextureMaterial *texMat = dynamic_cast<QSGTextureMaterial*>(mat);
+                if (texMat && texMat->texture()) {
+                    textures.insert(texMat->texture());
+                }
+                // QSGOpaqueTextureMaterial
+                QSGOpaqueTextureMaterial *opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial*>(mat);
+                if (opaqueTexMat && opaqueTexMat->texture()) {
+                    textures.insert(opaqueTexMat->texture());
+                }
+            }
+        }
 
-    //     // Check QSGSimpleTextureNode
-    //     if (auto simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node)) {
-    //         if (simpleTex->texture())
-    //             textures.insert(simpleTex->texture());
-    //     }
+        // Check QSGSimpleTextureNode
+        QSGSimpleTextureNode *simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node);
+        if (simpleTex && simpleTex->texture()) {
+            textures.insert(simpleTex->texture());
+        }
 
-    //     // Recurse through children
-    //     for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
-    //         collectTextures(child, textures);
-    //     }
-    // }
+        // Recurse through children
+        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
+            collectTextures(child, textures);
+        }
+    }
 
-    // // Add helper method to count total textures
-    // int countTotalTextures(QSGNode *root) {
-    //     std::unordered_set<QSGTexture *> textures;
-    //     collectTextures(root, textures);
-    //     return textures.size();
-    // }
+    // Modified version using QSet instead of std::unordered_set
+    int countTotalTextures(QSGNode *root) {
+        QSet<QSGTexture *> textures;
+        collectTextures(root, textures);
+        return textures.size();
+    }
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
