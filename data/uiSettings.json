@@ -3,14 +3,14 @@
   "uiConfigurations": {
     "uiSchema": "productK",
     "STB": {
-      "kv3": {
-	    "rowSpacing":104,
-		"rowTitle": {
-			"Height": 42,
-			"focusColor": "#ebebeb",
+            "kv3": {
+            "rowSpacing":104,
+            "rowTitle": {
+            "Height": 42,
+            "focusColor": "#ebebeb",
             "unFocusColor": "#ffffff",
             "fontFamily": "Roboto"
-		},
+            },
         "swimlaneSizeConfiguration": {
           "poster": {
             "default": { "height": 135, "posterHeight": 135, "posterWidth": 240, "itemSpacing": 24 },

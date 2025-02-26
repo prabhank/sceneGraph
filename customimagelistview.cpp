@@ -622,15 +622,14 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
     }
 
     // Calculate title width based on text content
-    static const QFont titleFont("Arial", 24, QFont::Bold);
-    QFontMetrics metrics(titleFont);
-    int textWidth = metrics.width(text) + 20;  // Add 20px padding
+    QFont titleFont("Roboto", 20, QFont::Bold);  // Using Roboto font, size 20, bold
+    QFontMetrics fm(titleFont);
+    int textWidth = fm.width(text) + 20;  // Add 20px padding
     int width = qMax(textWidth, static_cast<int>(std::ceil(rect.width())));
     int height = qMax(1, static_cast<int>(std::ceil(rect.height())));
 
     QImage textImage(width, height, QImage::Format_ARGB32_Premultiplied);
     if (textImage.isNull()) {
-        qWarning() << "Failed to create text image with size:" << width << "x" << height;
         return nullptr;
     }
 
@@ -638,24 +637,17 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
 
     QPainter painter;
     if (!painter.begin(&textImage)) {
-        qWarning() << "Failed to start painting on image";
         return nullptr;
     }
 
-    // Configure text rendering
+    // Configure text rendering with focus properties
     painter.setFont(titleFont);
-    painter.setPen(Qt::white);
+    painter.setPen(QColor("#ebebeb"));  // Set focus color
     painter.setRenderHints(QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
 
-    // Use classification ID as the row title
-    QString displayText = text;
-    if (displayText == "Default") {
-        displayText = "Featured"; // Optional: provide friendly name for default category
-    }
-    
     // Draw text with left alignment and vertical centering
-    int yPos = (height + metrics.ascent() - metrics.descent()) / 2;
-    painter.drawText(10, yPos, displayText); // Add 10px left margin
+    int yPos = (height + fm.ascent() - fm.descent()) / 2;
+    painter.drawText(10, yPos, text);
     
     painter.end();
 
@@ -666,12 +658,11 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
     );
 
     if (!texture) {
-        qWarning() << "Failed to create texture for row title";
         return nullptr;
     }
 
-    // Create rect with adjusted width based on text content
-    QRectF adjustedRect(rect.x(), rect.y(), textWidth, rect.height());
+    // Create adjusted rect with 8 pixels left offset
+    QRectF adjustedRect(rect.x() - 8, rect.y(), textWidth, rect.height());
     return createTexturedRect(adjustedRect, texture);
 }
 
