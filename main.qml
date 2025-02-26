@@ -45,5 +45,24 @@ Window {
                 console.log("CustomImageListView lost focus")
             }
         }
+
+        // Add key handler for toggling metrics overlay
+        Keys.onPressed: {
+            if (event.key === Qt.Key_M) {
+                metricsOverlay.enabled = !metricsOverlay.enabled
+                event.accepted = true
+            }
+        }
+    }
+
+    // Add metrics overlay
+    MetricsOverlay {
+        id: metricsOverlay
+        imageListView: imageListView
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 10
+        enabled: true
+        z: 1000 // Ensure it stays on top
     }
 }

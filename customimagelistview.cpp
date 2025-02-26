@@ -766,6 +766,15 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
         currentY += dims.rowHeight + m_rowSpacing;
     }
     
+    // Before returning, update metrics with accurate counts
+    int realNodeCount = countNodes(parentNode);
+    int realTextureCount = countTotalTextures(parentNode);
+    updateMetricCounts(realNodeCount, realTextureCount);
+    
+    qDebug() << "Scene graph metrics -"
+             << "Nodes:" << realNodeCount
+             << "Textures:" << realTextureCount;
+    
     return parentNode;
 }
 

@@ -5,10 +5,13 @@
 #include "customlistview.h"
 #include "customimagelistview.h"
 #include "verify_resources.h"
+#include <QLoggingCategory>
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+
+    //QLoggingCategory::setFilterRules("qt.scenegraph.general=true");
     
     // Initialize resources
     Q_INIT_RESOURCE(resources);

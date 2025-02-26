@@ -18,6 +18,8 @@
 #include <QNetworkConfiguration>
 #include <QSslError>
 #include <QPropertyAnimation>  // Add this include
+#include <QElapsedTimer>  // Add this include
+#include <QVector>  // Add this include
 
 class QSGTexture;
 class QSGGeometry;
@@ -45,6 +47,8 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(QStringList rowTitles READ rowTitles WRITE setRowTitles NOTIFY rowTitlesChanged)
     Q_PROPERTY(QUrl jsonSource READ jsonSource WRITE setJsonSource NOTIFY jsonSourceChanged)
     Q_PROPERTY(qreal startPositionX READ startPositionX WRITE setStartPositionX NOTIFY startPositionXChanged)
+    Q_PROPERTY(int nodeCount READ nodeCount CONSTANT)  // Simplified read-only property
+    Q_PROPERTY(int textureCount READ textureCount CONSTANT)  // Simplified read-only property
 
 private:
     // Add the network manager to private member variables section
@@ -120,6 +124,64 @@ private:
     void animateScroll(const QString& category, qreal targetX);
     void stopCurrentAnimation();
 
+    // Only keep track of node count
+    int m_nodeCount = 0;
+    int m_totalNodeCount = 0;  // Add this to store total node count
+    QAtomicInt m_textureCount = 0;  // Add this to store texture count
+
+    // Add helper method to count nodes recursively
+    int countNodes(QSGNode *root) {
+        if (!root)
+            return 0;
+
+        int total = 1; // count the current node
+        for (QSGNode *child = root->firstChild(); child; child = child->nextSibling()) {
+            total += countNodes(child);
+        }
+        return total;
+    }
+
+    // Add helper method to collect textures
+    void collectTextures(QSGNode *node, std::unordered_set<QSGTexture *> &textures) {
+        if (!node) return;
+
+        // Check geometry node materials
+        if (node->type() == QSGNode::GeometryNodeType) {
+            QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
+            QSGMaterial *mat = geometryNode->activeMaterial();
+            if (mat) {
+                // QSGTextureMaterial
+                if (auto texMat = dynamic_cast<QSGTextureMaterial *>(mat)) {
+                    if (texMat->texture())
+                        textures.insert(texMat->texture());
+                }
+                // QSGOpaqueTextureMaterial
+                if (auto opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial *>(mat)) {
+                    if (opaqueTexMat->texture())
+                        textures.insert(opaqueTexMat->texture());
+                }
+            }
+        }
+
+        // Check QSGSimpleTextureNode
+        if (auto simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node)) {
+            if (simpleTex->texture())
+                textures.insert(simpleTex->texture());
+        }
+
+        // Recurse through children
+        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
+            collectTextures(child, textures);
+        }
+    }
+
+    // Add helper method to count total textures
+    int countTotalTextures(QSGNode *root) {
+        std::unordered_set<QSGTexture *> textures;
+        collectTextures(root, textures);
+        return textures.size();
+    }
+
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
     ~CustomImageListView();
@@ -180,6 +242,20 @@ public:
 
     qreal startPositionX() const { return m_startPositionX; }
     void setStartPositionX(qreal x);
+
+    // Update accessors to get real-time counts
+    int nodeCount() const { return m_totalNodeCount; }
+    int textureCount() const { return m_textureCount; }
+    
+    // Add method to update metrics
+    void updateMetricCounts(int nodes, int textures) {
+        if (m_totalNodeCount != nodes || m_textureCount != textures) {
+            m_totalNodeCount = nodes;
+            m_textureCount = textures;
+            qDebug() << "Metrics updated - Nodes:" << m_totalNodeCount 
+                     << "Textures:" << m_textureCount;
+        }
+    }
 
 signals:
     void countChanged();

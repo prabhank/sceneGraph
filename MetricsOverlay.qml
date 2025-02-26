@@ -1,4 +1,4 @@
-import QtQuick 2.6
+import QtQuick 2.5
 
 Rectangle {
     id: root
@@ -16,47 +16,40 @@ Rectangle {
     
     visible: enabled && imageListView !== null
     
-    // Metrics display
     Column {
         id: metrics
         anchors.centerIn: parent
         spacing: 4
         
         Text {
+            id: nodeCountText
             color: "#ffffff"
             font.pixelSize: 12
-            text: "Nodes: " + (imageListView ? imageListView.nodeCount : 0)
+            text: "Scene Graph Nodes: 0"
         }
         
         Text {
+            id: textureCountText
             color: "#ffffff"
             font.pixelSize: 12
-            text: "Textures: " + (imageListView ? imageListView.textureCount : 0)
+            text: "Active Textures: 0"
         }
     }
     
-    // Polling timer for updates
     Timer {
         interval: updateInterval
         running: root.visible
         repeat: true
         onTriggered: {
-            // Force refresh via geometry change
-            var w = root.width
-            root.width = w - 1
-            root.width = w
+            // Update metrics display
+            var nodes = imageListView ? imageListView.nodeCount : 0
+            var textures = imageListView ? imageListView.textureCount : 0
+            nodeCountText.text = "Scene Graph Nodes: " + nodes
+            textureCountText.text = "Active Textures: " + textures
         }
     }
-    
-    // Drag support
-    MouseArea {
-        anchors.fill: parent
-        drag.target: parent
-        
-        // Constrain to parent boundaries
-        drag.minimumX: 0
-        drag.minimumY: 0
-        drag.maximumX: parent.parent ? parent.parent.width - parent.width : 0
-        drag.maximumY: parent.parent ? parent.parent.height - parent.height : 0
+
+    Component.onCompleted: {
+        console.log("MetricsOverlay initialized")
     }
 }

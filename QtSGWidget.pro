@@ -65,9 +65,9 @@ linux-rasp-pi-* {
 }
 
 # For Windows
-win32 {
-    LIBS += -lssleay32 -llibeay32
-}
+#win32 {
+#    LIBS += -lssleay32 -llibeay32
+#}
 
 # Enable OpenGL ES 2.0 on embedded platforms
 android|ios|qnx {
@@ -99,3 +99,5 @@ linux-rasp-pi-* {
 # Network configuration
 DEFINES += QT_NETWORK_LIB
 DEFINES += QT_NO_SSL=0
+
+DISTFILES +=
