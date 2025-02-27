@@ -142,6 +142,12 @@ private:
     // Add member to store complete JSON document
     QJsonObject m_parsedJson;  // Add this line
 
+    // Add flag to track destruction state
+    bool m_isBeingDestroyed = false;
+    
+    // Add method for safe cleanup
+    void safeCleanup();
+
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
     ~CustomImageListView();

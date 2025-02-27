@@ -144,28 +144,51 @@ void CustomImageListView::loadAllImages()
 
 CustomImageListView::~CustomImageListView()
 {
-    m_isDestroying = true;
-    
-    // Cancel pending requests
-    for (QNetworkReply *reply : m_pendingRequests) {
+    m_isBeingDestroyed = true;
+    safeCleanup();
+}
+
+void CustomImageListView::safeCleanup()
+{
+    // Stop any pending animations
+    if (m_scrollAnimation) {
+        m_scrollAnimation->stop();
+        delete m_scrollAnimation;
+        m_scrollAnimation = nullptr;
+    }
+
+    // Clear category animations
+    qDeleteAll(m_categoryAnimations);
+    m_categoryAnimations.clear();
+
+    // Cancel pending network requests
+    for (QNetworkReply* reply : m_pendingRequests) {
         if (reply) {
             reply->abort();
             reply->deleteLater();
         }
     }
     m_pendingRequests.clear();
-    
-    // Clear caches
+
+    // Clear URL cache
     m_urlImageCache.clear();
+
+    // Clean up textures
+    QMutexLocker locker(&m_loadMutex);
+    for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
+        if (it.value().node) {
+            delete it.value().node;
+            it.value().node = nullptr;
+        }
+        // Don't delete textures here as they belong to the window
+        it.value().texture = nullptr;
+    }
+    m_nodes.clear();
     
-    // Safely cleanup nodes
-    safeReleaseTextures();
-    
-    // Cleanup animations
-    stopCurrentAnimation();
-    qDeleteAll(m_categoryAnimations);
-    m_categoryAnimations.clear();
-    delete m_scrollAnimation;
+    // Clear data
+    m_imageData.clear();
+    m_rowTitles.clear();
+    m_categoryContentX.clear();
 }
 
 void CustomImageListView::safeReleaseTextures()
@@ -374,7 +397,7 @@ bool CustomImageListView::isReadyForTextures() const
 
 void CustomImageListView::loadImage(int index)
 {
-    if (m_isDestroying || !ensureValidWindow() || index >= m_imageData.size()) {
+    if (m_isBeingDestroyed || !ensureValidWindow() || index >= m_imageData.size()) {
         return;
     }
 
@@ -669,7 +692,7 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
 // Fix the return type from void to QSGNode*
 QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
-    if (!window() || !window()->isExposed()) {
+    if (m_isBeingDestroyed || !window() || !window()->isExposed()) {
         delete oldNode;
         return nullptr;
     }
@@ -745,7 +768,7 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
                 }
 
                 // Add title overlay
-                addTitleOverlay(itemContainer, rect, imgData.title);
+                //addTitleOverlay(itemContainer, rect, imgData.title);
 
                 // Add the container to parent
                 parentNode->appendChildNode(itemContainer);
@@ -897,14 +920,11 @@ void CustomImageListView::debugResourceSystem() const
 
 void CustomImageListView::itemChange(ItemChange change, const ItemChangeData &data)
 {
-    QQuickItem::itemChange(change, data);
-    if (change == ItemSceneChange) {
-        m_windowReady = (data.window != nullptr);
-        if (m_windowReady) {
-            initializeGL();  // Initialize OpenGL when window is ready
-            tryLoadImages();
-        }
+    if (change == ItemSceneChange && data.window == nullptr) {
+        // Window is being destroyed or item is being removed
+        safeCleanup();
     }
+    QQuickItem::itemChange(change, data);
 }
 
 void CustomImageListView::tryLoadImages()
@@ -1326,6 +1346,10 @@ bool CustomImageListView::event(QEvent *e)
 {
     if (e->type() == QEvent::FocusIn || e->type() == QEvent::FocusOut) {
         update();
+    }
+    if (e->type() == QEvent::DeferredDelete && !m_isBeingDestroyed) {
+        m_isBeingDestroyed = true;
+        safeCleanup();
     }
     return QQuickItem::event(e);
 }
