@@ -68,6 +68,12 @@ CustomImageListView::CustomImageListView(QQuickItem *parent)
     setupScrollAnimation();
 }
 
+CustomImageListView::~CustomImageListView()
+{
+    m_isBeingDestroyed = true;
+    safeCleanup();
+}
+
 void CustomImageListView::componentComplete()
 {
     QQuickItem::componentComplete();
@@ -98,7 +104,7 @@ void CustomImageListView::geometryChanged(const QRectF &newGeometry, const QRect
     }
 }
 
-// Update loadAllImages method
+// Replace the loadAllImages method with this improved version
 void CustomImageListView::loadAllImages()
 {
     if (!isReadyForTextures()) {
@@ -108,7 +114,7 @@ void CustomImageListView::loadAllImages()
         return;
     }
 
-    // Calculate layout with reduced spacing
+    // Calculate layout and total item count
     qreal currentY = 0;
     int totalItems = 0;
 
@@ -122,83 +128,125 @@ void CustomImageListView::loadAllImages()
             }
         }
         
-        // Add category title height with reduced spacing
-        currentY += m_titleHeight; // Using reduced title height
-        
-        // Add height for all items in category
+        currentY += m_titleHeight; 
         currentY += itemsInCategory * (m_itemHeight + m_spacing);
-        
-        // Add reduced spacing between categories
         currentY += m_rowSpacing;
     }
 
-    // Load all images
-    for (int i = 0; i < m_count; i++) {
-        loadImage(i);
-    }
-
-    // Update content height
+    // Update content height and count
     setImplicitHeight(currentY);
     m_count = totalItems;
-}
-
-CustomImageListView::~CustomImageListView()
-{
-    m_isBeingDestroyed = true;
-    safeCleanup();
-}
-
-void CustomImageListView::safeCleanup()
-{
-    // Stop any pending animations
-    if (m_scrollAnimation) {
-        m_scrollAnimation->stop();
-        delete m_scrollAnimation;
-        m_scrollAnimation = nullptr;
-    }
-
-    // Clear category animations
-    qDeleteAll(m_categoryAnimations);
-    m_categoryAnimations.clear();
-
-    // Safely handle network cleanup
-    QList<QNetworkReply*> pendingReplies;
     
-    // Critical section: only lock while accessing the map
-    {
-        QMutexLocker networkLocker(&m_networkMutex);
-        pendingReplies = m_pendingRequests.values();
-        m_pendingRequests.clear();
-    }
-
-    // Now safely abort each reply outside the mutex lock
-    for (QNetworkReply* reply : pendingReplies) {
-        if (reply) {
-            reply->disconnect();  // Disconnect all signals first
-            reply->abort();
-            reply->deleteLater();
+    // Get list of visible indices first
+    QVector<int> visibleIndices = getVisibleIndices();
+    QVector<int> offscreenIndices;
+    
+    // Add all other indices to the offscreen list
+    for (int i = 0; i < m_count; i++) {
+        if (!visibleIndices.contains(i)) {
+            offscreenIndices.append(i);
         }
     }
-
-    // Clear URL cache
-    m_urlImageCache.clear();
-
-    // Clean up textures
-    QMutexLocker locker(&m_loadMutex);
-    for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
-        if (it.value().node) {
-            delete it.value().node;
-            it.value().node = nullptr;
-        }
-        // Don't delete textures here as they belong to the window
-        it.value().texture = nullptr;
-    }
-    m_nodes.clear();
     
-    // Clear data
-    m_imageData.clear();
-    m_rowTitles.clear();
-    m_categoryContentX.clear();
+    qDebug() << "Loading" << visibleIndices.size() << "visible images first, then" 
+             << offscreenIndices.size() << "offscreen images";
+    
+    // First load all visible images
+    for (int index : visibleIndices) {
+        loadImage(index);
+    }
+    
+    // Then queue off-screen images with a delay to prevent blocking UI
+    for (int i = 0; i < offscreenIndices.size(); i++) {
+        int index = offscreenIndices[i];
+        // Spread out loading of offscreen images to prevent overloading
+        QTimer::singleShot(50 * (i + 1), this, [this, index]() {
+            if (!m_isBeingDestroyed) {
+                loadImage(index);
+            }
+        });
+    }
+}
+
+// Add this new method to determine which indices are visible
+QVector<int> CustomImageListView::getVisibleIndices()
+{
+    QVector<int> visibleIndices;
+    
+    if (width() <= 0 || height() <= 0) {
+        return visibleIndices;
+    }
+    
+    // Define the viewport boundaries
+    qreal viewportTop = m_contentY;
+    qreal viewportBottom = m_contentY + height();
+    
+    qreal currentY = 0;
+    int currentIndex = 0;
+    
+    // Iterate through categories
+    for (int categoryIndex = 0; categoryIndex < m_rowTitles.size(); ++categoryIndex) {
+        QString categoryName = m_rowTitles[categoryIndex];
+        CategoryDimensions dims = getDimensionsForCategory(categoryName);
+        
+        // Add title height
+        currentY += m_titleHeight + 10; // Same spacing as in updatePaintNode
+        
+        // Skip if entire category is below viewport
+        if (currentY > viewportBottom) {
+            // Skip to next category after counting items in this one
+            for (const ImageData &imgData : m_imageData) {
+                if (imgData.category == categoryName) {
+                    currentIndex++;
+                }
+            }
+            // Add category height and continue
+            currentY += dims.rowHeight + m_rowSpacing;
+            continue;
+        }
+        
+        // Calculate category end position
+        qreal categoryEndY = currentY + dims.rowHeight;
+        
+        // Skip if entire category is above viewport
+        if (categoryEndY < viewportTop) {
+            // Skip this category
+            for (const ImageData &imgData : m_imageData) {
+                if (imgData.category == categoryName) {
+                    currentIndex++;
+                }
+            }
+            currentY = categoryEndY + m_rowSpacing;
+            continue;
+        }
+        
+        // Category is visible (at least partially), check each item
+        qreal xPos = m_startPositionX + 10; // Same as in updatePaintNode
+        qreal categoryX = xPos - getCategoryContentX(categoryName);
+        int itemsInThisCategory = 0;
+        
+        for (int i = 0; i < m_imageData.size(); i++) {
+            if (m_imageData[i].category == categoryName) {
+                // Item is in this category, check if it's visible
+                if (currentY >= viewportTop - dims.posterHeight && 
+                    currentY <= viewportBottom + dims.posterHeight &&
+                    categoryX >= -dims.posterWidth &&
+                    categoryX <= width() + dims.posterWidth) {
+                    
+                    visibleIndices.append(currentIndex);
+                }
+                
+                categoryX += dims.posterWidth + dims.itemSpacing;
+                currentIndex++;
+                itemsInThisCategory++;
+            }
+        }
+        
+        // Move to next category
+        currentY = categoryEndY + m_rowSpacing;
+    }
+    
+    return visibleIndices;
 }
 
 void CustomImageListView::safeReleaseTextures()
@@ -1452,6 +1500,10 @@ void CustomImageListView::setContentY(qreal y)
     if (m_contentY != y) {
         m_contentY = y;
         emit contentYChanged();
+        
+        // Add this call to check visibility on scroll
+        handleContentPositionChange();
+        
         update();
     }
 }
@@ -1830,8 +1882,16 @@ void CustomImageListView::initializeGL()
 // Add helper methods for per-category scrolling
 void CustomImageListView::setCategoryContentX(const QString& category, qreal x)
 {
-    m_categoryContentX[category] = x;
-    update();
+    if (m_categoryContentX.value(category, 0.0) != x) {
+        m_categoryContentX[category] = x;
+        
+        // Only trigger visibility check when scrolling the current category
+        if (category == m_currentCategory) {
+            handleContentPositionChange();
+        }
+        
+        update();
+    }
 }
 
 qreal CustomImageListView::getCategoryContentX(const QString& category) const
@@ -1943,5 +2003,82 @@ void CustomImageListView::setEnableTextureMetrics(bool enable)
         emit enableTextureMetricsChanged();
         update();
     }
+}
+
+void CustomImageListView::handleContentPositionChange()
+{
+    // Don't proceed if we're being destroyed
+    if (m_isBeingDestroyed) {
+        return;
+    }
+    
+    // Update loading priorities based on new visible area
+    QVector<int> visibleIndices = getVisibleIndices();
+    
+    // Prioritize loading visible images first
+    for (int index : visibleIndices) {
+        if (index >= 0 && index < m_imageData.size() && !m_nodes.contains(index)) {
+            // Use a short delay to avoid blocking UI during scrolling
+            QTimer::singleShot(10, this, [this, index]() {
+                if (!m_isBeingDestroyed) {
+                    loadImage(index);
+                }
+            });
+        }
+    }
+}
+
+// Fix the safeCleanup method - ensuring it's complete
+void CustomImageListView::safeCleanup()
+{
+    // Stop any pending animations
+    if (m_scrollAnimation) {
+        m_scrollAnimation->stop();
+        delete m_scrollAnimation;
+        m_scrollAnimation = nullptr;
+    }
+
+    // Clear category animations
+    qDeleteAll(m_categoryAnimations);
+    m_categoryAnimations.clear();
+
+    // Safely handle network cleanup
+    QList<QNetworkReply*> pendingReplies;
+    
+    // Critical section: only lock while accessing the map
+    {
+        QMutexLocker networkLocker(&m_networkMutex);
+        pendingReplies = m_pendingRequests.values();
+        m_pendingRequests.clear();
+    }
+
+    // Now safely abort each reply outside the mutex lock
+    for (QNetworkReply* reply : pendingReplies) {
+        if (reply) {
+            reply->disconnect();  // Disconnect all signals first
+            reply->abort();
+            reply->deleteLater();
+        }
+    }
+
+    // Clear URL cache
+    m_urlImageCache.clear();
+
+    // Clean up textures
+    QMutexLocker locker(&m_loadMutex);
+    for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
+        if (it.value().node) {
+            delete it.value().node;
+            it.value().node = nullptr;
+        }
+        // Don't delete textures here as they belong to the window
+        it.value().texture = nullptr;
+    }
+    m_nodes.clear();
+    
+    // Clear data
+    m_imageData.clear();
+    m_rowTitles.clear();
+    m_categoryContentX.clear();
 }
 

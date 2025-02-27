@@ -217,6 +217,10 @@ private:
         return textures.size();
     }
 
+    // Add these new methods
+    QVector<int> getVisibleIndices();
+    void handleContentPositionChange();
+
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
     ~CustomImageListView();
