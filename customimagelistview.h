@@ -54,6 +54,8 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(qreal startPositionX READ startPositionX WRITE setStartPositionX NOTIFY startPositionXChanged)
     Q_PROPERTY(int nodeCount READ nodeCount CONSTANT)  // Simplified read-only property
     Q_PROPERTY(int textureCount READ textureCount CONSTANT)  // Simplified read-only property
+    Q_PROPERTY(bool enableNodeMetrics READ enableNodeMetrics WRITE setEnableNodeMetrics NOTIFY enableNodeMetricsChanged)
+    Q_PROPERTY(bool enableTextureMetrics READ enableTextureMetrics WRITE setEnableTextureMetrics NOTIFY enableTextureMetricsChanged)
 
 private:
     // Add the network manager to private member variables section
@@ -81,6 +83,8 @@ private:
     int m_itemsPerRow = 5;
     QUrl m_jsonSource;
     QMutex m_loadMutex;
+    bool m_enableNodeMetrics = false;
+    bool m_enableTextureMetrics = false;
 
     // Add new members for UI settings
     int m_titleHeight = 25; // Reduced from 30 to 25
@@ -252,6 +256,12 @@ public:
     int nodeCount() const { return m_totalNodeCount; }
     int textureCount() const { return m_textureCount; }
     
+    bool enableNodeMetrics() const { return m_enableNodeMetrics; }
+    void setEnableNodeMetrics(bool enable);
+    
+    bool enableTextureMetrics() const { return m_enableTextureMetrics; }
+    void setEnableTextureMetrics(bool enable);
+
     // Add method to update metrics
     void updateMetricCounts(int nodes, int textures) {
         if (m_totalNodeCount != nodes || m_textureCount != textures) {
@@ -284,6 +294,8 @@ signals:
     void jsonSourceChanged();
     void linkActivated(const QString& action, const QString& url);  // Add this signal
     void startPositionXChanged();
+    void enableNodeMetricsChanged();
+    void enableTextureMetricsChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;

@@ -767,13 +767,19 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
     }
     
     // Before returning, update metrics with accurate counts
-    int realNodeCount = countNodes(parentNode);
-    int realTextureCount = countTotalTextures(parentNode);
-    updateMetricCounts(realNodeCount, realTextureCount);
-    
-    qDebug() << "Scene graph metrics -"
-             << "Nodes:" << realNodeCount
-             << "Textures:" << realTextureCount;
+    if (m_enableNodeMetrics) {
+        int realNodeCount = countNodes(parentNode);
+        qDebug() << "Scene graph node metrics - Nodes:" << realNodeCount;
+        
+        if (m_enableTextureMetrics) {
+            int realTextureCount = countTotalTextures(parentNode);
+            qDebug() << "Scene graph texture metrics - Textures:" << realTextureCount;
+            updateMetricCounts(realNodeCount, realTextureCount);
+        } else {
+            
+            updateMetricCounts(realNodeCount, 0);
+        }
+    }
     
     return parentNode;
 }
@@ -1855,6 +1861,24 @@ void CustomImageListView::setStartPositionX(qreal x)
     if (m_startPositionX != x) {
         m_startPositionX = x;
         emit startPositionXChanged();
+        update();
+    }
+}
+
+void CustomImageListView::setEnableNodeMetrics(bool enable)
+{
+    if (m_enableNodeMetrics != enable) {
+        m_enableNodeMetrics = enable;
+        emit enableNodeMetricsChanged();
+        update();
+    }
+}
+
+void CustomImageListView::setEnableTextureMetrics(bool enable)
+{
+    if (m_enableTextureMetrics != enable) {
+        m_enableTextureMetrics = enable;
+        emit enableTextureMetricsChanged();
         update();
     }
 }

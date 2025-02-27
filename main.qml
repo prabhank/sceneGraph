@@ -46,10 +46,18 @@ Window {
             }
         }
 
+
         // Add key handler for toggling metrics overlay
+        // This is only for testing integrating these metrics in main should follow IB App guidelines
         Keys.onPressed: {
             if (event.key === Qt.Key_M) {
                 metricsOverlay.enabled = !metricsOverlay.enabled
+                event.accepted = true
+            } else if (event.key === Qt.Key_N) {
+                imageListView.enableNodeMetrics = !imageListView.enableNodeMetrics
+                event.accepted = true
+            } else if (event.key === Qt.Key_T) {
+                imageListView.enableTextureMetrics = !imageListView.enableTextureMetrics
                 event.accepted = true
             }
         }
