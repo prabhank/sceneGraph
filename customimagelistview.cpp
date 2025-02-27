@@ -144,6 +144,26 @@ void CustomImageListView::loadAllImages()
 
 CustomImageListView::~CustomImageListView()
 {
+    m_isDestroying = true;
+    
+    // Safely handle pending network requests
+    QMutexLocker locker(&m_loadMutex);
+    auto pendingRequests = m_pendingRequests;  // Create a copy
+    m_pendingRequests.clear();  // Clear original first
+    
+    // Now safely handle the copies
+    for (QNetworkReply *reply : pendingRequests) {
+        if (reply) {
+            disconnect(reply, nullptr, this, nullptr);  // Disconnect all signals
+            reply->disconnect();  // Disconnect from all slots
+            if (reply->isRunning()) {
+                reply->abort();
+            }
+            reply->deleteLater();
+        }
+    }
+    
+    // ...rest of existing destructor code...
     m_isBeingDestroyed = true;
     safeCleanup();
 }
@@ -497,58 +517,60 @@ QImage CustomImageListView::loadLocalImageFromPath(const QString &path) const
 // Update loadUrlImage method to better handle HTTP requests
 void CustomImageListView::loadUrlImage(int index, const QUrl &url)
 {
-    if (!url.isValid()) {
-        qWarning() << "Invalid URL:" << url.toString();
-        createFallbackTexture(index);
+    if (!m_networkManager || m_isDestroying) {
         return;
     }
 
     // Convert URL if needed (for URLs starting with //)
     QUrl finalUrl = url;
     if (url.toString().startsWith("//")) {
-        finalUrl = QUrl("http:" + url.toString());
+        finalUrl = QUrl("https:" + url.toString());
     }
 
-    // For HTTP URLs
-    if (finalUrl.scheme() == "http") {
-        qDebug() << "Loading image" << index << "from URL:" << finalUrl.toString();
-        
-        // Create network request
-        QNetworkRequest request(finalUrl);
-        
-        // Essential headers for Qt 5.6
-        request.setRawHeader("User-Agent", "Mozilla/5.0 (compatible; Qt/5.6)");
-        request.setRawHeader("Accept", "image/webp,image/apng,image/*,*/*;q=0.8");
-        request.setRawHeader("Connection", "keep-alive");
-        
-        // Enable redirect following
-        request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
-        request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
-        
-        // Cancel any existing request
-        if (m_pendingRequests.contains(index)) {
-            m_pendingRequests[index]->abort();
-            m_pendingRequests[index]->deleteLater();
-            m_pendingRequests.remove(index);
+    QNetworkRequest request(finalUrl);
+    
+    // Set up request headers for embedded systems
+    request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+    request.setAttribute(QNetworkRequest::HttpPipeliningAllowedAttribute, true);
+    request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::PreferCache);
+    
+    // Add required headers for HTTPS
+    request.setRawHeader("User-Agent", "QtImageLoader/1.0");
+    request.setRawHeader("Accept", "*/*");
+    request.setRawHeader("Connection", "keep-alive");
+    
+    #ifndef QT_NO_SSL
+        if (finalUrl.scheme() == "https") {
+            QSslConfiguration sslConfig = request.sslConfiguration();
+            sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+            sslConfig.setProtocol(QSsl::TlsV1_0);
+            request.setSslConfiguration(sslConfig);
         }
+    #endif
 
-        // Create and store network reply
-        QNetworkReply *reply = m_networkManager->get(request);
-        m_pendingRequests[index] = reply;
-        
-        // Connect signals with Qt 5.6 compatible syntax
-        connect(reply, SIGNAL(finished()), this, SLOT(onNetworkReplyFinished()));
-        connect(reply, SIGNAL(error(QNetworkReply::NetworkError)), 
-                this, SLOT(onNetworkError(QNetworkReply::NetworkError)));
-        connect(reply, SIGNAL(sslErrors(QList<QSslError>)), 
-                reply, SLOT(ignoreSslErrors()));
-        
-        // Add longer timeout for slower connections
-        QTimer::singleShot(30000, reply, SLOT(abort()));
-    } else {
-        qWarning() << "Unsupported URL scheme:" << finalUrl.scheme();
-        createFallbackTexture(index);
+    // Cancel any existing request for this index
+    if (m_pendingRequests.contains(index)) {
+        QNetworkReply* oldReply = m_pendingRequests[index];
+        if (oldReply) {
+            oldReply->abort();
+            oldReply->deleteLater();
+        }
+        m_pendingRequests.remove(index);
     }
+
+    // Create and store network reply
+    QNetworkReply *reply = m_networkManager->get(request);
+    m_pendingRequests[index] = reply;
+
+    // Connect signals with Qt 5.6 compatible syntax
+    connect(reply, SIGNAL(finished()), this, SLOT(onNetworkReplyFinished()));
+    connect(reply, SIGNAL(error(QNetworkReply::NetworkError)), 
+            this, SLOT(onNetworkError(QNetworkReply::NetworkError)));
+    connect(reply, SIGNAL(sslErrors(QList<QSslError>)), 
+            reply, SLOT(ignoreSslErrors()));
+
+    // Add timeout
+    QTimer::singleShot(30000, reply, SLOT(abort()));
 }
 
 void CustomImageListView::processLoadedImage(int index, const QImage &image)
@@ -1752,34 +1774,54 @@ void CustomImageListView::initializeGL()
 {
     if (!window()) return;
 
-    // Set environment variables for debugging
-    qputenv("QSG_INFO", "1");
-    qputenv("QT_LOGGING_RULES", "qt.scenegraph.general=true");
-
-    // Set OpenGL attributes
-    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
-    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-
-    // Force software rendering for embedded systems
-    qputenv("QT_QUICK_BACKEND", "software");
-    
-    // Connect to window's sceneGraphInitialized signal
-    connect(window(), &QQuickWindow::beforeRendering, this, [this]() {
-        // Verify OpenGL context
-        QOpenGLContext *context = window()->openglContext();
-        if (context) {
-            qDebug() << "OpenGL Version:" << context->format().majorVersion() 
-                     << "." << context->format().minorVersion();
-            qDebug() << "Using OpenGL:" << context->isValid();
-            
-            // Set up surface format
-            QSurfaceFormat format = context->format();
-            format.setRenderableType(QSurfaceFormat::OpenGLES);
-            format.setVersion(2, 0);
-            format.setSwapInterval(1);
-            format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-            window()->setFormat(format);
+    // Use a guarded connection for OpenGL initialization
+    QPointer<CustomImageListView> guard(this);
+    connect(window(), &QQuickWindow::beforeRendering, this, [this, guard]() {
+        if (!guard) return;  // Skip if object is being destroyed
+        
+        if (window()) {  // Double check window still exists
+            QOpenGLContext *context = window()->openglContext();
+            if (context) {
+                // Log OpenGL version
+                qDebug() << "OpenGL Version:" << context->format().majorVersion() 
+                         << "." << context->format().minorVersion();
+                
+                // Set up surface format for embedded systems
+                QSurfaceFormat format = context->format();
+                format.setRenderableType(QSurfaceFormat::OpenGLES);
+                format.setVersion(2, 0);  // Use OpenGL ES 2.0
+                format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+                format.setSwapInterval(1);  // Enable VSync
+                
+                // Set additional attributes for embedded systems
+                format.setDepthBufferSize(16);
+                format.setStencilBufferSize(8);
+                format.setSamples(0);  // Disable MSAA for performance
+                
+                // Apply format
+                window()->setFormat(format);
+                
+                // Set default OpenGL state
+                if (context->makeCurrent(window())) {
+                    // Enable blending for transparency
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    
+                    // Disable depth testing (2D rendering)
+                    glDisable(GL_DEPTH_TEST);
+                    
+                    // Set viewport to window size
+                    glViewport(0, 0, window()->width(), window()->height());
+                    
+                    // Clear any error flags
+                    glGetError();
+                    
+                    context->doneCurrent();
+                }
+                
+                // Disconnect after initialization
+                disconnect(window(), &QQuickWindow::beforeRendering, this, nullptr);
+            }
         }
     }, Qt::DirectConnection);
 }
@@ -1819,15 +1861,16 @@ void CustomImageListView::setupNetworkManager()
 {
     if (!m_networkManager) return;
     
-    // Configure network manager for Qt 5.6
-    m_networkManager->setConfiguration(QNetworkConfiguration());
-    m_networkManager->setNetworkAccessible(QNetworkAccessManager::Accessible);
-
-    // Enable SSL
+    // Configure network settings for embedded systems
+    QNetworkConfiguration config;
+    config.setConnectTimeout(30000);  // 30 second timeout
+    m_networkManager->setConfiguration(config);
+    
+    // Enable SSL/HTTPS support
     #ifndef QT_NO_SSL
         QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
-        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
-        sslConfig.setProtocol(QSsl::TlsV1_0);
+        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);  // Required for self-signed certs
+        sslConfig.setProtocol(QSsl::TlsV1_0);  // Use TLS 1.0 for maximum compatibility
         QSslConfiguration::setDefaultConfiguration(sslConfig);
     #endif
 }

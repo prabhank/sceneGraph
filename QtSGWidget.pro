@@ -64,6 +64,13 @@ linux-rasp-pi-* {
     }
 }
 
+# SSL Configuration for embedded systems
+linux-rasp-pi-* {
+    DEFINES += RASPBERRY_PI
+    LIBS += -lssl -lcrypto
+    QMAKE_CXXFLAGS += -DOPENSSL_NO_ENGINE
+}
+
 # For Windows
 win32 {
     LIBS += -lssleay32 -llibeay32
@@ -95,6 +102,10 @@ linux-rasp-pi-* {
     DEFINES += RASPBERRY_PI
     LIBS += -lssl -lcrypto
 }
+
+# Ensure SSL is enabled
+DEFINES -= QT_NO_SSL
+DEFINES += QT_NETWORK_LIB
 
 # Network configuration
 DEFINES += QT_NETWORK_LIB
