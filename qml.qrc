@@ -6,6 +6,5 @@
         <file>images/img3.jpg</file>
         <file>images/img4.jpg</file>
         <file>images/img5.jpg</file>
-        <file>MetricsOverlay.qml</file>
     </qresource>
 </RCC>
