@@ -336,6 +336,7 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
+    QMutex m_networkMutex;
     // Add OpenGL initialization method
     void initializeGL();
     
@@ -419,8 +420,21 @@ private slots:
     void onNetworkReplyFinished() {
         QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
         if (!reply) return;
-
-        int index = m_pendingRequests.key(reply, -1);
+        
+        int index = -1;
+        
+        // Minimize mutex lock duration - just extract what we need
+        {
+            QMutexLocker locker(&m_networkMutex);
+            index = m_pendingRequests.key(reply, -1);
+            
+            // Remove from pending requests map while under lock
+            if (index != -1) {
+                m_pendingRequests.remove(index);
+            }
+        }
+        
+        // Process the reply outside of mutex lock to avoid deadlocks
         if (index == -1) {
             reply->deleteLater();
             return;
@@ -443,15 +457,25 @@ private slots:
             createFallbackTexture(index);
         }
 
-        m_pendingRequests.remove(index);
         reply->deleteLater();
     }
 
     void onNetworkError(QNetworkReply::NetworkError code) {
         QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
         if (!reply) return;
-
-        int index = m_pendingRequests.key(reply, -1);
+        
+        int index = -1;
+        
+        // Minimize mutex lock duration
+        {
+            QMutexLocker locker(&m_networkMutex);
+            index = m_pendingRequests.key(reply, -1);
+            if (index != -1) {
+                m_pendingRequests.remove(index);
+            }
+        }
+        
+        // Process outside the lock
         if (index != -1) {
             createFallbackTexture(index);
         }

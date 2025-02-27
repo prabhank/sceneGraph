@@ -161,14 +161,24 @@ void CustomImageListView::safeCleanup()
     qDeleteAll(m_categoryAnimations);
     m_categoryAnimations.clear();
 
-    // Cancel pending network requests
-    for (QNetworkReply* reply : m_pendingRequests) {
+    // Safely handle network cleanup
+    QList<QNetworkReply*> pendingReplies;
+    
+    // Critical section: only lock while accessing the map
+    {
+        QMutexLocker networkLocker(&m_networkMutex);
+        pendingReplies = m_pendingRequests.values();
+        m_pendingRequests.clear();
+    }
+
+    // Now safely abort each reply outside the mutex lock
+    for (QNetworkReply* reply : pendingReplies) {
         if (reply) {
+            reply->disconnect();  // Disconnect all signals first
             reply->abort();
             reply->deleteLater();
         }
     }
-    m_pendingRequests.clear();
 
     // Clear URL cache
     m_urlImageCache.clear();
@@ -526,16 +536,33 @@ void CustomImageListView::loadUrlImage(int index, const QUrl &url)
         request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
         request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
         
-        // Cancel any existing request
-        if (m_pendingRequests.contains(index)) {
-            m_pendingRequests[index]->abort();
-            m_pendingRequests[index]->deleteLater();
-            m_pendingRequests.remove(index);
+        QNetworkReply* oldReply = nullptr;
+        
+        // Only lock mutex for the map operations
+        {
+            QMutexLocker locker(&m_networkMutex);
+            
+            // Store old reply for later deletion outside the lock
+            if (m_pendingRequests.contains(index)) {
+                oldReply = m_pendingRequests.take(index);
+            }
+        }
+        
+        // Cancel old request outside the mutex lock
+        if (oldReply) {
+            oldReply->disconnect(); // Prevent callbacks
+            oldReply->abort();
+            oldReply->deleteLater();
         }
 
-        // Create and store network reply
+        // Create network reply
         QNetworkReply *reply = m_networkManager->get(request);
-        m_pendingRequests[index] = reply;
+        
+        // Store the reply in our map with minimal lock time
+        {
+            QMutexLocker locker(&m_networkMutex);
+            m_pendingRequests[index] = reply;
+        }
         
         // Connect signals with Qt 5.6 compatible syntax
         connect(reply, SIGNAL(finished()), this, SLOT(onNetworkReplyFinished()));

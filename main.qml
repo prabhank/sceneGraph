@@ -39,18 +39,8 @@ Window {
             }
         }
 
-        onMoodImageSelected: function(url) {
-            console.log("Mood image URL:", url)
-            // Handle the mood image URL here
-        }
-        
-        // Add focus handling
-        onFocusChanged: {
-            if (focus) {
-                console.log("CustomImageListView gained focus")
-            } else {
-                console.log("CustomImageListView lost focus")
-            }
+
+
         // Loader for dynamic loading
         Loader {
             id: viewLoader
@@ -115,10 +105,7 @@ Window {
             }
         }
 
-        onAssetFocused: function(assetData) {
-            console.log("Asset focused, complete data:", JSON.stringify(assetData, null, 2))
-            // Now you have access to all JSON fields exactly as they were in the source
-        }
+
     }
 
     // Window level key handling
@@ -144,11 +131,6 @@ Window {
             clip: true
             startPositionX: 50
 
-            // Improve focus handling
-            onFocusChanged: {
-                console.log("Gallery view focus changed:", focus, 
-                          "Active focus:", Window.activeFocusItem === this)
-            }
 
             // Only handle specific keys, let others propagate
             Keys.onPressed: {
@@ -184,6 +166,26 @@ Window {
                         break
                 }
             }
+
+            onAssetFocused: function(assetData) {
+                console.log("Asset focused, complete data:", JSON.stringify(assetData, null, 2))
+                // Now you have access to all JSON fields exactly as they were in the source
+            }
+
+            onMoodImageSelected: function(url) {
+                console.log("Mood image URL:", url)
+                // Handle the mood image URL here
+            }
+
+            // Add focus handling
+            onFocusChanged: {
+                if (focus) {
+                    console.log("CustomImageListView gained focus")
+                } else {
+                    console.log("CustomImageListView lost focus")
+                }
+            }
+
 
             Component.onCompleted: {
                 console.log("Gallery component completed")
