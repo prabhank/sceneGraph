@@ -22,8 +22,6 @@
 #include <QNetworkConfiguration>
 #include <QSslError>
 #include <QPropertyAnimation>  // Add this include
-#include <QElapsedTimer>  // Add this include
-#include <QVector>  // Add this include
 #include <QSet>  // Add this include
 
 class QSGTexture;
@@ -58,6 +56,7 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(bool enableTextureMetrics READ enableTextureMetrics WRITE setEnableTextureMetrics NOTIFY enableTextureMetricsChanged)
 
 private:
+
     // Add the network manager to private member variables section
     QNetworkAccessManager* m_networkManager = nullptr;
     qreal m_startPositionX = 0;  // Add this line for the start position
@@ -132,6 +131,12 @@ private:
     void setupScrollAnimation();
     void animateScroll(const QString& category, qreal targetX);
     void stopCurrentAnimation();
+
+    // Add flag to track destruction state
+    bool m_isBeingDestroyed = false;
+
+    // Add method for safe cleanup
+    void safeCleanup();
 
     // Only keep track of node count
     int m_nodeCount = 0;

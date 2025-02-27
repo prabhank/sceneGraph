@@ -144,28 +144,51 @@ void CustomImageListView::loadAllImages()
 
 CustomImageListView::~CustomImageListView()
 {
-    m_isDestroying = true;
-    
-    // Cancel pending requests
-    for (QNetworkReply *reply : m_pendingRequests) {
+    m_isBeingDestroyed = true;
+    safeCleanup();
+}
+
+void CustomImageListView::safeCleanup()
+{
+    // Stop any pending animations
+    if (m_scrollAnimation) {
+        m_scrollAnimation->stop();
+        delete m_scrollAnimation;
+        m_scrollAnimation = nullptr;
+    }
+
+    // Clear category animations
+    qDeleteAll(m_categoryAnimations);
+    m_categoryAnimations.clear();
+
+    // Cancel pending network requests
+    for (QNetworkReply* reply : m_pendingRequests) {
         if (reply) {
             reply->abort();
             reply->deleteLater();
         }
     }
     m_pendingRequests.clear();
-    
-    // Clear caches
+
+    // Clear URL cache
     m_urlImageCache.clear();
+
+    // Clean up textures
+    QMutexLocker locker(&m_loadMutex);
+    for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
+        if (it.value().node) {
+            delete it.value().node;
+            it.value().node = nullptr;
+        }
+        // Don't delete textures here as they belong to the window
+        it.value().texture = nullptr;
+    }
+    m_nodes.clear();
     
-    // Safely cleanup nodes
-    safeReleaseTextures();
-    
-    // Cleanup animations
-    stopCurrentAnimation();
-    qDeleteAll(m_categoryAnimations);
-    m_categoryAnimations.clear();
-    delete m_scrollAnimation;
+    // Clear data
+    m_imageData.clear();
+    m_rowTitles.clear();
+    m_categoryContentX.clear();
 }
 
 void CustomImageListView::safeReleaseTextures()
@@ -180,6 +203,7 @@ void CustomImageListView::safeReleaseTextures()
     }
     m_nodes.clear();
 }
+
 
 void CustomImageListView::setCount(int count)
 {
