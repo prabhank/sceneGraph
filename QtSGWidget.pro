@@ -1,10 +1,31 @@
-QT += core gui network quick
+QT += core gui network quick quick-private gui-private qml-private
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 TARGET = QtSGWidget
 TEMPLATE = app
 
 CONFIG += c++11
+
+# Correct Windows MinGW settings
+win32-g++ {
+    CONFIG(debug, debug|release) {
+        LIBS += -L$$[QT_INSTALL_LIBS] \
+                -lQt5Quickd \
+                -lQt5Quick$${QT_VERSION_MAJOR}d
+    } else {
+        LIBS += -L$$[QT_INSTALL_LIBS] \
+                -lQt5Quick \
+                -lQt5Quick$${QT_VERSION_MAJOR}
+    }
+
+    INCLUDEPATH += $$[QT_INSTALL_HEADERS]/QtQuick/$$[QT_VERSION] \
+                  $$[QT_INSTALL_HEADERS]/QtQuick/$$[QT_VERSION]/QtQuick \
+                  $$[QT_INSTALL_HEADERS]/QtQuick/$$[QT_VERSION]/QtQuick/private \
+                  $$[QT_INSTALL_HEADERS]/QtQml/$$[QT_VERSION] \
+                  $$[QT_INSTALL_HEADERS]/QtQml/$$[QT_VERSION]/QtQml \
+                  $$[QT_INSTALL_HEADERS]/QtQml/$$[QT_VERSION]/QtQml/private
+}
+
 
 # Source files
 SOURCES += \
@@ -14,7 +35,8 @@ SOURCES += \
     customimagelistview.cpp \
     verify_resources.cpp \
     texturemanager.cpp \
-    texturebuffer.cpp
+    texturebuffer.cpp \
+    customtext.cpp
 
 HEADERS += \
     customrectangle.h \
@@ -22,7 +44,8 @@ HEADERS += \
     customimagelistview.h \
     verify_resources.h \
     texturemanager.h \
-    texturebuffer.h
+    texturebuffer.h \
+    customtext.h
 
 # Resources
 RESOURCES += \
@@ -101,3 +124,5 @@ DEFINES += QT_NETWORK_LIB
 DEFINES += QT_NO_SSL=0
 
 DISTFILES +=
+
+CONFIG += link_private
