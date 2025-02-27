@@ -194,15 +194,15 @@ Window {
         }
     }
 
-    // Metrics overlay
-    MetricsOverlay {
-        id: metricsOverlay
-        imageListView: viewLoader.item
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 10
-        enabled: viewLoader.item ? true : false
-        z: 1000
-        visible: viewLoader.item ? true : false
-    }
+//    // Metrics overlay
+//    MetricsOverlay {
+//        id: metricsOverlay
+//        imageListView: viewLoader.item
+//        anchors.right: parent.right
+//        anchors.top: parent.top
+//        anchors.margins: 10
+//        enabled: viewLoader.item ? true : false
+//        z: 1000
+//        visible: viewLoader.item ? true : false
+//    }
 }

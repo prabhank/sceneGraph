@@ -50,8 +50,8 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(QStringList rowTitles READ rowTitles WRITE setRowTitles NOTIFY rowTitlesChanged)
     Q_PROPERTY(QUrl jsonSource READ jsonSource WRITE setJsonSource NOTIFY jsonSourceChanged)
     Q_PROPERTY(qreal startPositionX READ startPositionX WRITE setStartPositionX NOTIFY startPositionXChanged)
-    Q_PROPERTY(int nodeCount READ nodeCount CONSTANT)  // Simplified read-only property
-    Q_PROPERTY(int textureCount READ textureCount CONSTANT)  // Simplified read-only property
+    // Q_PROPERTY(int nodeCount READ nodeCount CONSTANT)  // Simplified read-only property
+    // Q_PROPERTY(int textureCount READ textureCount CONSTANT)  // Simplified read-only property
     // Q_PROPERTY(bool enableNodeMetrics READ enableNodeMetrics WRITE setEnableNodeMetrics NOTIFY enableNodeMetricsChanged)
     // Q_PROPERTY(bool enableTextureMetrics READ enableTextureMetrics WRITE setEnableTextureMetrics NOTIFY enableTextureMetricsChanged)
 
