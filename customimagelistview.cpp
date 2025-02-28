@@ -29,6 +29,10 @@
 #include <QNetworkReply>
 #include <QSslSocket>
 #include <QtNetwork/QSslConfiguration>
+#include <QRunnable>  // Add this line to include QRunnable
+#include <QPointer>
+
+
 
 //Q_LOGGING_CATEGORY(ihScheduleModel2, "custom", QtDebugMsg)
 
@@ -70,7 +74,28 @@ CustomImageListView::CustomImageListView(QQuickItem *parent)
 
 CustomImageListView::~CustomImageListView()
 {
+    // Mark as being destroyed first
     m_isBeingDestroyed = true;
+    
+    // Critical step: ensure scene graph isn't rendering our nodes
+    QQuickWindow* win = window();
+    if (win) {
+        // Disconnect signals in Qt 5.6 compatible way
+        disconnect(win, SIGNAL(beforeRendering()), this, nullptr);
+        disconnect(win, SIGNAL(afterRendering()), this, nullptr);
+        
+        // Block scene graph updates for our item
+        setVisible(false);
+        setEnabled(false);
+        
+        // Force update to apply visibility change before cleanup
+        win->update();
+        
+        // Wait for update to be processed
+        QCoreApplication::processEvents();
+    }
+    
+    // Safe cleanup with proper barriers
     safeCleanup();
 }
 
@@ -780,8 +805,23 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
 // Fix the return type from void to QSGNode*
 QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
+    // Return null immediately if we're being destroyed to prevent render thread from accessing nodes
     if (m_isBeingDestroyed || !window() || !window()->isExposed()) {
-        delete oldNode;
+        if (oldNode) {
+            // Use a safer way to delete the node tree that won't crash during render
+            oldNode->markDirty(QSGNode::DirtySubtreeBlocked); // Block rendering of this subtree
+            
+            // Schedule node deletion for next frame when render thread is done with it
+            QQuickWindow *win = window();
+            if (win) {
+                // Create and schedule a SafeNodeDeleter to handle cleanup
+                win->scheduleRenderJob(new SafeNodeDeleter(oldNode), 
+                                     QQuickWindow::BeforeSynchronizingStage);
+            }
+            
+            // Don't delete here - let the scene graph handle it
+            return nullptr;
+        }
         return nullptr;
     }
     
@@ -868,20 +908,20 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
         currentY += dims.rowHeight + m_rowSpacing;
     }
     
-    // // Before returning, update metrics with accurate counts
-    // if (m_enableNodeMetrics) {
-    //     int realNodeCount = countNodes(parentNode);
-    //     qDebug() << "Scene graph node metrics - Nodes:" << realNodeCount;
+    // Before returning, update metrics with accurate counts
+    if (m_enableNodeMetrics) {
+        int realNodeCount = countNodes(parentNode);
+        qDebug() << "Scene graph node metrics - Nodes:" << realNodeCount;
         
-    //     if (m_enableTextureMetrics) {
-    //         int realTextureCount = countTotalTextures(parentNode);
-    //         qDebug() << "Scene graph texture metrics - Textures:" << realTextureCount;
-    //         updateMetricCounts(realNodeCount, realTextureCount);
-    //     } else {
+        if (m_enableTextureMetrics) {
+            int realTextureCount = countTotalTextures(parentNode);
+            qDebug() << "Scene graph texture metrics - Textures:" << realTextureCount;
+            updateMetricCounts(realNodeCount, realTextureCount);
+        } else {
             
-    //         updateMetricCounts(realNodeCount, 0);
-    //     }
-    // }
+            updateMetricCounts(realNodeCount, 0);
+        }
+    }
     
     return parentNode;
 }
@@ -889,6 +929,8 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
 // Helper method for selection effects
 void CustomImageListView::addSelectionEffects(QSGNode* container, const QRectF& rect)
 {
+    if (m_isBeingDestroyed) return;
+    
     // Calculate scaled dimensions for focus border to match zoomed asset
     const float scaleFactor = 1.1f;  // Match the zoom factor from createTexturedRect
     qreal widthDiff = rect.width() * (scaleFactor - 1.0f);
@@ -1023,9 +1065,34 @@ void CustomImageListView::debugResourceSystem() const
 
 void CustomImageListView::itemChange(ItemChange change, const ItemChangeData &data)
 {
-    if (change == ItemSceneChange && data.window == nullptr) {
-        // Window is being destroyed or item is being removed
-        safeCleanup();
+    // If we're removed from scene, mark destruction and clean up
+    if (change == ItemSceneChange) {
+        if (data.window == nullptr) {
+            // Item being removed from scene
+            m_isBeingDestroyed = true;
+            
+            // Block rendering before cleanup
+            setVisible(false);
+            
+            // Ensure nodes won't be accessed
+            QQuickWindow* oldWindow = window();
+            if (oldWindow) {
+                disconnect(oldWindow, SIGNAL(beforeRendering()), this, nullptr);
+                disconnect(oldWindow, SIGNAL(afterRendering()), this, nullptr);
+                
+                // Force update to apply visibility change
+                oldWindow->update();
+            }
+            
+            // Use QPointer to safely track object lifetime
+            QPointer<CustomImageListView> safeThis = this;
+            QTimer::singleShot(0, [safeThis]() {
+                // Only call safeCleanup if the object still exists
+                if (safeThis) {
+                    safeThis->safeCleanup();
+                }
+            });
+        }
     }
     QQuickItem::itemChange(change, data);
 }
@@ -1855,41 +1922,6 @@ void CustomImageListView::addDefaultItems()
     update();
 }
 
-void CustomImageListView::initializeGL()
-{
-    if (!window()) return;
-
-    // Set environment variables for debugging
-    qputenv("QSG_INFO", "1");
-    qputenv("QT_LOGGING_RULES", "qt.scenegraph.general=true");
-
-    // Set OpenGL attributes
-    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
-    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-
-    // Force software rendering for embedded systems
-    qputenv("QT_QUICK_BACKEND", "software");
-    
-    // Connect to window's sceneGraphInitialized signal
-    connect(window(), &QQuickWindow::beforeRendering, this, [this]() {
-        // Verify OpenGL context
-        QOpenGLContext *context = window()->openglContext();
-        if (context) {
-            qDebug() << "OpenGL Version:" << context->format().majorVersion() 
-                     << "." << context->format().minorVersion();
-            qDebug() << "Using OpenGL:" << context->isValid();
-            
-            // Set up surface format
-            QSurfaceFormat format = context->format();
-            format.setRenderableType(QSurfaceFormat::OpenGLES);
-            format.setVersion(2, 0);
-            format.setSwapInterval(1);
-            format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-            window()->setFormat(format);
-        }
-    }, Qt::DirectConnection);
-}
 
 // Add helper methods for per-category scrolling
 void CustomImageListView::setCategoryContentX(const QString& category, qreal x)
@@ -1999,23 +2031,23 @@ void CustomImageListView::setStartPositionX(qreal x)
     }
 }
 
-// void CustomImageListView::setEnableNodeMetrics(bool enable)
-// {
-//     if (m_enableNodeMetrics != enable) {
-//         m_enableNodeMetrics = enable;
-//         emit enableNodeMetricsChanged();
-//         update();
-//     }
-// }
+void CustomImageListView::setEnableNodeMetrics(bool enable)
+{
+    if (m_enableNodeMetrics != enable) {
+        m_enableNodeMetrics = enable;
+        emit enableNodeMetricsChanged();
+        update();
+    }
+}
 
-// void CustomImageListView::setEnableTextureMetrics(bool enable)
-// {
-//     if (m_enableTextureMetrics != enable) {
-//         m_enableTextureMetrics = enable;
-//         emit enableTextureMetricsChanged();
-//         update();
-//     }
-// }
+void CustomImageListView::setEnableTextureMetrics(bool enable)
+{
+    if (m_enableTextureMetrics != enable) {
+        m_enableTextureMetrics = enable;
+        emit enableTextureMetricsChanged();
+        update();
+    }
+}
 
 void CustomImageListView::handleContentPositionChange()
 {
@@ -2043,7 +2075,36 @@ void CustomImageListView::handleContentPositionChange()
 // Fix the safeCleanup method - ensuring it's complete
 void CustomImageListView::safeCleanup()
 {
-    // Stop any pending animations
+    // Use a static guard to prevent reentrant calls
+    static bool cleaningInProgress = false;
+    if (cleaningInProgress) {
+        return; // Prevent recursive cleanup
+    }
+    cleaningInProgress = true;
+    
+    // First mark destruction flag to prevent further rendering
+    m_isBeingDestroyed = true;
+    
+    // Critical step: make item invisible to prevent it from being rendered
+    setVisible(false);
+    setEnabled(false);
+    
+    // Unregister from render thread by ensuring item isn't part of scene graph
+    QQuickWindow* win = window();
+    if (win) {
+        // Use Qt 5.6 compatible syntax
+        disconnect(win, SIGNAL(beforeRendering()), this, nullptr);
+        disconnect(win, SIGNAL(afterRendering()), this, nullptr);
+        disconnect(win, SIGNAL(sceneGraphInitialized()), this, nullptr);
+        
+        // Force a sync/render cycle to apply visibility change before we touch the nodes
+        win->update();
+        
+        // For Qt 5.6, we need to ensure the update is processed
+        QCoreApplication::processEvents();
+    }
+    
+    // Stop any pending animations first - they could trigger updates
     if (m_scrollAnimation) {
         m_scrollAnimation->stop();
         delete m_scrollAnimation;
@@ -2051,46 +2112,71 @@ void CustomImageListView::safeCleanup()
     }
 
     // Clear category animations
-    qDeleteAll(m_categoryAnimations);
+    QList<QPropertyAnimation*> animations = m_categoryAnimations.values();
     m_categoryAnimations.clear();
+    for (QPropertyAnimation* anim : animations) {
+        anim->stop();
+        delete anim;
+    }
 
-    // Safely handle network cleanup
+    // Handle network cleanup - collect replies first
     QList<QNetworkReply*> pendingReplies;
-    
-    // Critical section: only lock while accessing the map
     {
         QMutexLocker networkLocker(&m_networkMutex);
         pendingReplies = m_pendingRequests.values();
         m_pendingRequests.clear();
     }
 
-    // Now safely abort each reply outside the mutex lock
+    // Process replies outside the lock
     for (QNetworkReply* reply : pendingReplies) {
         if (reply) {
-            reply->disconnect();  // Disconnect all signals first
+            reply->disconnect();
             reply->abort();
             reply->deleteLater();
         }
     }
 
-    // Clear URL cache
+    // Clear URL cache to free memory
     m_urlImageCache.clear();
 
-    // Clean up textures
-    QMutexLocker locker(&m_loadMutex);
-    for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
-        if (it.value().node) {
-            delete it.value().node;
-            it.value().node = nullptr;
+    // Add memory barrier before texture operations to ensure 
+    // rendering thread isn't accessing textures
+    QCoreApplication::processEvents();
+
+    // Critical section for safe node handling
+    {
+        QMutexLocker locker(&m_loadMutex);
+        
+        // Create a list of nodes to be safely deleted
+        QList<QSGNode*> nodesToDelete;
+        
+        // First collect all nodes to be deleted
+        for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
+            if (it.value().node) {
+                nodesToDelete.append(it.value().node);
+                // Just clear pointer immediately to prevent any further access
+                it.value().node = nullptr;
+            }
+            // Just nullify the texture pointer (window owns the texture)
+            it.value().texture = nullptr;
         }
-        // Don't delete textures here as they belong to the window
-        it.value().texture = nullptr;
+        
+        // Schedule deletion of collected nodes when safe
+        if (win && !nodesToDelete.isEmpty()) {
+            // Schedule a safe batch deletion job
+            win->scheduleRenderJob(new SafeNodeBatchDeleter(nodesToDelete),
+                                 QQuickWindow::BeforeRenderingStage);
+        }
+        
+        m_nodes.clear();
     }
-    m_nodes.clear();
     
-    // Clear data
+    // Clear data structures that might be accessed from other methods
     m_imageData.clear();
     m_rowTitles.clear();
     m_categoryContentX.clear();
+    
+    // Reset tracking state
+    cleaningInProgress = false;
 }
 

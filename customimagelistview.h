@@ -23,9 +23,46 @@
 #include <QSslError>
 #include <QPropertyAnimation>  // Add this include
 #include <QSet>  // Add this include
+#include <QRunnable>  // Add this line to include QRunnable
+#include <QPointer>
+
+
 
 class QSGTexture;
 class QSGGeometry;
+
+// Add this better SafeNodeDeleter definition
+class SafeNodeDeleter : public QRunnable {
+    public:
+        explicit SafeNodeDeleter(QSGNode* node) : m_node(node) {}
+        
+        void run() override {
+            if (m_node) {
+                delete m_node;
+            }
+        }
+        
+    private:
+        QSGNode* m_node;
+};
+
+// Add this new batch deleter for multiple nodes
+class SafeNodeBatchDeleter : public QRunnable {
+    public:
+        explicit SafeNodeBatchDeleter(const QList<QSGNode*>& nodes) : m_nodes(nodes) {}
+        
+        void run() override {
+            for (QSGNode* node : m_nodes) {
+                if (node) {
+                    delete node;
+                }
+            }
+            m_nodes.clear();
+        }
+        
+    private:
+        QList<QSGNode*> m_nodes;
+};
 
 class CustomImageListView : public QQuickItem
 {
@@ -50,10 +87,10 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(QStringList rowTitles READ rowTitles WRITE setRowTitles NOTIFY rowTitlesChanged)
     Q_PROPERTY(QUrl jsonSource READ jsonSource WRITE setJsonSource NOTIFY jsonSourceChanged)
     Q_PROPERTY(qreal startPositionX READ startPositionX WRITE setStartPositionX NOTIFY startPositionXChanged)
-    // Q_PROPERTY(int nodeCount READ nodeCount CONSTANT)  // Simplified read-only property
-    // Q_PROPERTY(int textureCount READ textureCount CONSTANT)  // Simplified read-only property
-    // Q_PROPERTY(bool enableNodeMetrics READ enableNodeMetrics WRITE setEnableNodeMetrics NOTIFY enableNodeMetricsChanged)
-    // Q_PROPERTY(bool enableTextureMetrics READ enableTextureMetrics WRITE setEnableTextureMetrics NOTIFY enableTextureMetricsChanged)
+    Q_PROPERTY(int nodeCount READ nodeCount CONSTANT)  // Simplified read-only property
+    Q_PROPERTY(int textureCount READ textureCount CONSTANT)  // Simplified read-only property
+    Q_PROPERTY(bool enableNodeMetrics READ enableNodeMetrics WRITE setEnableNodeMetrics NOTIFY enableNodeMetricsChanged)
+    Q_PROPERTY(bool enableTextureMetrics READ enableTextureMetrics WRITE setEnableTextureMetrics NOTIFY enableTextureMetricsChanged)
 
 private:
     // Move ImageData struct definition to the top of the private section
@@ -100,8 +137,8 @@ private:
     int m_itemsPerRow = 5;
     QUrl m_jsonSource;
     QMutex m_loadMutex;
-    // bool m_enableNodeMetrics = false;
-    // bool m_enableTextureMetrics = false;
+    bool m_enableNodeMetrics = false;
+    bool m_enableTextureMetrics = false;
 
     // Add new members for UI settings
     int m_titleHeight = 25; // Reduced from 30 to 25
@@ -159,63 +196,63 @@ private:
     // Add method for safe cleanup
     void safeCleanup();
 
-    // // Only keep track of node count
-    // int m_nodeCount = 0;
-    // int m_totalNodeCount = 0;  // Add this to store total node count
-    // QAtomicInt m_textureCount = 0;  // Add this to store texture count
+    // Only keep track of node count
+    int m_nodeCount = 0;
+    int m_totalNodeCount = 0;  // Add this to store total node count
+    QAtomicInt m_textureCount = 0;  // Add this to store texture count
 
-    // // Add helper method to count nodes recursively
-    // int countNodes(QSGNode *root) {
-    //     if (!root)
-    //         return 0;
+    // Add helper method to count nodes recursively
+    int countNodes(QSGNode *root) {
+        if (!root)
+            return 0;
 
-    //     int total = 1; // count the current node
-    //     for (QSGNode *child = root->firstChild(); child; child = child->nextSibling()) {
-    //         total += countNodes(child);
-    //     }
-    //     return total;
-    // }
+        int total = 1; // count the current node
+        for (QSGNode *child = root->firstChild(); child; child = child->nextSibling()) {
+            total += countNodes(child);
+        }
+        return total;
+    }
 
-    // // Modified version using QSet instead of std::unordered_set
-    // void collectTextures(QSGNode *node, QSet<QSGTexture *> &textures) {
-    //     if (!node) return;
+    // Modified version using QSet instead of std::unordered_set
+    void collectTextures(QSGNode *node, QSet<QSGTexture *> &textures) {
+        if (!node) return;
 
-    //     // Check geometry node materials
-    //     if (node->type() == QSGNode::GeometryNodeType) {
-    //         QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
-    //         QSGMaterial *mat = geometryNode->activeMaterial();
-    //         if (mat) {
-    //             // QSGTextureMaterial
-    //             QSGTextureMaterial *texMat = dynamic_cast<QSGTextureMaterial*>(mat);
-    //             if (texMat && texMat->texture()) {
-    //                 textures.insert(texMat->texture());
-    //             }
-    //             // QSGOpaqueTextureMaterial
-    //             QSGOpaqueTextureMaterial *opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial*>(mat);
-    //             if (opaqueTexMat && opaqueTexMat->texture()) {
-    //                 textures.insert(opaqueTexMat->texture());
-    //             }
-    //         }
-    //     }
+        // Check geometry node materials
+        if (node->type() == QSGNode::GeometryNodeType) {
+            QSGGeometryNode *geometryNode = static_cast<QSGGeometryNode*>(node);
+            QSGMaterial *mat = geometryNode->activeMaterial();
+            if (mat) {
+                // QSGTextureMaterial
+                QSGTextureMaterial *texMat = dynamic_cast<QSGTextureMaterial*>(mat);
+                if (texMat && texMat->texture()) {
+                    textures.insert(texMat->texture());
+                }
+                // QSGOpaqueTextureMaterial
+                QSGOpaqueTextureMaterial *opaqueTexMat = dynamic_cast<QSGOpaqueTextureMaterial*>(mat);
+                if (opaqueTexMat && opaqueTexMat->texture()) {
+                    textures.insert(opaqueTexMat->texture());
+                }
+            }
+        }
 
-    //     // Check QSGSimpleTextureNode
-    //     QSGSimpleTextureNode *simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node);
-    //     if (simpleTex && simpleTex->texture()) {
-    //         textures.insert(simpleTex->texture());
-    //     }
+        // Check QSGSimpleTextureNode
+        QSGSimpleTextureNode *simpleTex = dynamic_cast<QSGSimpleTextureNode*>(node);
+        if (simpleTex && simpleTex->texture()) {
+            textures.insert(simpleTex->texture());
+        }
 
-    //     // Recurse through children
-    //     for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
-    //         collectTextures(child, textures);
-    //     }
-    // }
+        // Recurse through children
+        for (QSGNode *child = node->firstChild(); child; child = child->nextSibling()) {
+            collectTextures(child, textures);
+        }
+    }
 
-    // // Modified version using QSet instead of std::unordered_set
-    // int countTotalTextures(QSGNode *root) {
-    //     QSet<QSGTexture *> textures;
-    //     collectTextures(root, textures);
-    //     return textures.size();
-    // }
+    // Modified version using QSet instead of std::unordered_set
+    int countTotalTextures(QSGNode *root) {
+        QSet<QSGTexture *> textures;
+        collectTextures(root, textures);
+        return textures.size();
+    }
 
     // Add these new methods
     QVector<int> getVisibleIndices();
@@ -282,25 +319,25 @@ public:
     qreal startPositionX() const { return m_startPositionX; }
     void setStartPositionX(qreal x);
 
-    // // Update accessors to get real-time counts
-    // int nodeCount() const { return m_totalNodeCount; }
-    // int textureCount() const { return m_textureCount; }
+    // Update accessors to get real-time counts
+    int nodeCount() const { return m_totalNodeCount; }
+    int textureCount() const { return m_textureCount; }
     
-    // bool enableNodeMetrics() const { return m_enableNodeMetrics; }
-    // void setEnableNodeMetrics(bool enable);
+    bool enableNodeMetrics() const { return m_enableNodeMetrics; }
+    void setEnableNodeMetrics(bool enable);
     
-    // bool enableTextureMetrics() const { return m_enableTextureMetrics; }
-    // void setEnableTextureMetrics(bool enable);
+    bool enableTextureMetrics() const { return m_enableTextureMetrics; }
+    void setEnableTextureMetrics(bool enable);
 
-    // // Add method to update metrics
-    // void updateMetricCounts(int nodes, int textures) {
-    //     if (m_totalNodeCount != nodes || m_textureCount != textures) {
-    //         m_totalNodeCount = nodes;
-    //         m_textureCount = textures;
-    //         qDebug() << "Metrics updated - Nodes:" << m_totalNodeCount 
-    //                  << "Textures:" << m_textureCount;
-    //     }
-    // }
+    // Add method to update metrics
+    void updateMetricCounts(int nodes, int textures) {
+        if (m_totalNodeCount != nodes || m_textureCount != textures) {
+            m_totalNodeCount = nodes;
+            m_textureCount = textures;
+            qDebug() << "Metrics updated - Nodes:" << m_totalNodeCount 
+                     << "Textures:" << m_textureCount;
+        }
+    }
 
 signals:
     void countChanged();
@@ -326,8 +363,8 @@ signals:
     void startPositionXChanged();
     void moodImageSelected(const QString& url);  // Add this new signal
     void assetFocused(const QJsonObject& assetData);  // Modified to pass complete JSON object
-    // void enableNodeMetricsChanged();
-    // void enableTextureMetricsChanged();
+    void enableNodeMetricsChanged();
+    void enableTextureMetricsChanged();
 
 protected:
     QSGNode *updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *) override;
@@ -341,8 +378,6 @@ protected:
 
 private:
     QMutex m_networkMutex;
-    // Add OpenGL initialization method
-    void initializeGL();
     
     // Add loadAllImages declaration with other loading-related methods
     void loadAllImages();
