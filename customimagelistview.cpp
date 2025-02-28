@@ -1143,9 +1143,17 @@ void CustomImageListView::setCurrentIndex(int index)
 
 void CustomImageListView::keyPressEvent(QKeyEvent *event)
 {
-    qDebug() << "Key pressed:" << event->key() << "Has focus:" << hasActiveFocus();
+    qDebug() << "Key pressed in CustomImageListView:" << event->key() << "Has focus:" << hasActiveFocus();
     
     switch (event->key()) {
+        case Qt::Key_Left:
+            if (!navigateLeft()) {
+                // Important: Don't accept the event if we're at leftmost position
+                event->setAccepted(false);
+                return;
+            }
+            event->accept();
+            break;
         case Qt::Key_Return:
         case Qt::Key_Enter:
         case Qt::Key_Space:
@@ -1154,10 +1162,6 @@ void CustomImageListView::keyPressEvent(QKeyEvent *event)
             break;
         case Qt::Key_I:
             handleKeyAction(Qt::Key_I);
-            event->accept();
-            break;
-        case Qt::Key_Left:        // Add back left navigation
-            navigateLeft();
             event->accept();
             break;
         case Qt::Key_Right:       // Add back right navigation
@@ -1203,11 +1207,26 @@ void CustomImageListView::handleKeyAction(Qt::Key key)
     }
 }
 
-void CustomImageListView::navigateLeft()
+bool CustomImageListView::navigateLeft()
 {
     QString currentCategory = m_imageData[m_currentIndex].category;
     int prevIndex = m_currentIndex - 1;
     
+    // Check if we're at the leftmost item in the category
+    bool isLeftmost = true;
+    for (int i = 0; i < m_currentIndex; i++) {
+        if (m_imageData[i].category == currentCategory) {
+            isLeftmost = false;
+            break;
+        }
+    }
+    
+    if (isLeftmost) {
+        qDebug() << "At leftmost position, letting event propagate";
+        return false;  // This will cause the event to propagate up
+    }
+    
+    // Handle navigation within the category
     while (prevIndex >= 0) {
         if (m_imageData[prevIndex].category != currentCategory) {
             break;
@@ -1217,8 +1236,10 @@ void CustomImageListView::navigateLeft()
         ensureFocus();
         updateCurrentCategory();
         update();
-        return;
+        return true;
     }
+    
+    return false;
 }
 
 void CustomImageListView::navigateRight()
@@ -1578,7 +1599,6 @@ void CustomImageListView::setContentY(qreal y)
 {
     if (m_contentY != y) {
         m_contentY = y;
-        emit contentYChanged();
         
         // Add this call to check visibility on scroll
         handleContentPositionChange();

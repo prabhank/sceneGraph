@@ -392,7 +392,7 @@ private:
     void debugResourceSystem() const;  // Add this line
     void tryLoadImages();
     void updateFocus();
-    void navigateLeft();
+    bool navigateLeft();
     void navigateRight();
     void ensureFocus();  // Add this
     void navigateUp();
