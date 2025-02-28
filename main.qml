@@ -70,4 +70,17 @@ Window {
             // Now you have access to all JSON fields exactly as they were in the source
         }
     }
+
+
+    // Metrics overlay
+    MetricsOverlay {
+        id: metricsOverlay
+        imageListView: viewLoader.item
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: 10
+        enabled: viewLoader.item ? true : false
+        z: 1000
+        visible: viewLoader.item ? true : false
+    }
 }
