@@ -1,5 +1,6 @@
 import QtQuick 2.5
 import QtQuick.Window 2.2
+import QtQuick.Controls 1.4
 import Custom 1.0
 
 Window {
@@ -9,64 +10,18 @@ Window {
     color: "black"
     title: qsTr("Menu Gallery View")
 
-    CustomImageListView {
-        id: imageListView
+    // Add helper function at Window level
+    function isBackKey(key) {
+        return key === Qt.Key_Back ||
+               key === Qt.Key_Escape ||
+               key === Qt.Key_Backspace
+    }
+
+    // Add focus scope to manage focus properly
+    FocusScope {
+        id: rootFocusScope
         anchors.fill: parent
-        jsonSource: "qrc:/data/embeddedHubMenu.json"
-        focus: true
-        clip: true
-        startPositionX: 50  // Specify the starting X position here (e.g., 50 pixels)
-
-        // Add vertical menu rectangle
-        Rectangle {
-            id: verticalMenu
-            width: 60
-            anchors {
-                left: parent.left
-                top: parent.top
-                bottom: parent.bottom
-            }
-            color: "#333333"
-            activeFocusOnTab: true
-            focus: true // Take initial focus
-            
-            // Add visual indicator for focus
-            Rectangle {
-                id: focusIndicator
-                width: 4
-                anchors {
-                    right: parent.right
-                    top: parent.top
-                    bottom: parent.bottom
-                }
-                color: parent.activeFocus ? "#00ff00" : "transparent"
-            }
-
-            // Add KeyNavigation instead of Keys handlers
-            KeyNavigation.right: viewLoader.item || launchButton
-            
-            // Make it focusable
-            MouseArea {
-                anchors.fill: parent
-                onClicked: verticalMenu.forceActiveFocus()
-            }
-
-            // Add state for better focus visibility
-            states: [
-                State {
-                    name: "focused"
-                    when: verticalMenu.activeFocus
-                    PropertyChanges {
-                        target: verticalMenu
-                        color: "#444444"
-                    }
-                }
-            ]
-            
-            Behavior on color {
-                ColorAnimation { duration: 150 }
-            }
-        }
+        focus: true  // Give focus to the scope
 
         // Key handler for root focus scope
         Keys.onPressed: {
@@ -89,23 +44,33 @@ Window {
         // Loader for dynamic loading
         Loader {
             id: viewLoader
-            anchors {
-                left: verticalMenu.right
-                right: parent.right
-                top: parent.top
-                bottom: parent.bottom
-            }
+            anchors.fill: parent
             focus: true  // Loader should have focus within the scope
-
             onLoaded: {
                 console.log("Loader onLoaded called")
                 if (item) {
-                    // Set up KeyNavigation for loaded item
-                    item.KeyNavigation.left = verticalMenu
                     focusTimer.start()
                 }
             }
 
+            Keys.onPressed: {
+                console.log("Loader received key:", event.key)
+                if (event.key === Qt.Key_Left) {
+                    console.log("Left key pressed in loader")
+                    // Add any additional logic for left key here
+                    event.accepted = true
+                } else if (event.key === Qt.Key_Right) {
+                    console.log("Right key pressed in loader")
+                    // Add any additional logic for right key here
+                    event.accepted = true
+                } else if (isBackKey(event.key)) {
+                    if (viewLoader.sourceComponent) {
+                        viewLoader.sourceComponent = null
+                        event.accepted = true
+                        console.log("Gallery unloaded due to back key in loader")
+                    }
+                }
+            }
             onStatusChanged: {
                 console.log("Loader status:", status)
                 if (status === Loader.Null) {
@@ -129,111 +94,18 @@ Window {
             }
         }
 
-        // Add a debug connection to track focus changes
-        Connections {
-            target: verticalMenu
-            onActiveFocusChanged: console.log("Vertical menu focus changed:", verticalMenu.activeFocus)
-        }
-
         // Launch button
         Button {
             id: launchButton
-            anchors.centerIn: viewLoader
+            anchors.centerIn: parent
             text: "Launch Gallery"
             visible: !viewLoader.sourceComponent
             onClicked: {
             viewLoader.sourceComponent = galleryComponent
             }
-            // Add KeyNavigation
-            KeyNavigation.left: verticalMenu
         }
 
 
-        // Component definition for the gallery view
-        Component {
-            id: galleryComponent
-            
-            CustomImageListView {
-                anchors.fill: parent
-                jsonSource: "qrc:/data/embeddedHubMenu.json"
-                focus: true
-                clip: true
-                startPositionX: 50
-
-                // Add KeyNavigation
-                KeyNavigation.left: verticalMenu
-
-                // Only handle specific keys, let others propagate
-                Keys.onPressed: {
-                    console.log("Gallery received key:", event.key)
-                    if (event.key === Qt.Key_M) {
-                        metricsOverlay.enabled = !metricsOverlay.enabled
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_N) {
-                        enableNodeMetrics = !enableNodeMetrics
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_T) {
-                        enableTextureMetrics = !enableTextureMetrics
-                        event.accepted = true
-                    }
-                    // Don't accept other keys, let them propagate
-                }
-
-                onLinkActivated: function(action, url) {
-                    console.log("Link activated - Action:", action, "URL:", url)
-                    switch(action) {
-                        case "OK":
-                            console.log("Processing OK action with URL:", url)
-                            // Add your content playback logic here
-                            break
-                            
-                        case "info":
-                            console.log("Processing info action with URL:", url)
-                            // Add your info display logic here
-                            break
-                            
-                        default:
-                            console.log("Unknown action type:", action)
-                            break
-                    }
-                }
-
-                onAssetFocused: function(assetData) {
-                    console.log("Asset focused, complete data:", JSON.stringify(assetData, null, 2))
-                    // Now you have access to all JSON fields exactly as they were in the source
-                }
-
-                onMoodImageSelected: function(url) {
-                    console.log("Mood image URL:", url)
-                    // Handle the mood image URL here
-                }
-
-                // Add focus handling
-                onFocusChanged: {
-                    if (focus) {
-                        console.log("CustomImageListView gained focus")
-                    } else {
-                        console.log("CustomImageListView lost focus")
-                    }
-                }
-
-                // Set the KeyNavigation target explicitly
-                property Item navigationLeftTarget: verticalMenu
-
-                // Focus handling
-                onActiveFocusChanged: {
-                    console.log("Gallery active focus changed:", activeFocus)
-                    if (!activeFocus) {
-                        console.log("Focus candidate:", verticalMenu.activeFocus ? "vertical menu" : "other")
-                    }
-                }
-
-                Component.onCompleted: {
-                    console.log("Gallery component completed")
-                    forceActiveFocus()
-                }
-            }
-        }
     }
 
     // Window level key handling
@@ -248,6 +120,79 @@ Window {
         }
     }
 
+    // Component definition for the gallery view
+    Component {
+        id: galleryComponent
+
+        CustomImageListView {
+            anchors.fill: parent
+            jsonSource: "qrc:/data/embeddedHubMenu.json"
+            focus: true
+            clip: true
+            startPositionX: 50
+
+
+            // Only handle specific keys, let others propagate
+            Keys.onPressed: {
+                console.log("Gallery received key:", event.key)
+                if (event.key === Qt.Key_M) {
+                    metricsOverlay.enabled = !metricsOverlay.enabled
+                    event.accepted = true
+                } else if (event.key === Qt.Key_N) {
+                    enableNodeMetrics = !enableNodeMetrics
+                    event.accepted = true
+                } else if (event.key === Qt.Key_T) {
+                    enableTextureMetrics = !enableTextureMetrics
+                    event.accepted = true
+                }
+                // Don't accept other keys, let them propagate
+            }
+
+            onLinkActivated: function(action, url) {
+                console.log("Link activated - Action:", action, "URL:", url)
+                switch(action) {
+                    case "OK":
+                        console.log("Processing OK action with URL:", url)
+                        // Add your content playback logic here
+                        break
+
+                    case "info":
+                        console.log("Processing info action with URL:", url)
+                        // Add your info display logic here
+                        break
+
+                    default:
+                        console.log("Unknown action type:", action)
+                        break
+                }
+            }
+
+            onAssetFocused: function(assetData) {
+                console.log("Asset focused, complete data:", JSON.stringify(assetData, null, 2))
+                // Now you have access to all JSON fields exactly as they were in the source
+            }
+
+            onMoodImageSelected: function(url) {
+                console.log("Mood image URL:", url)
+                // Handle the mood image URL here
+            }
+
+            // Add focus handling
+            onFocusChanged: {
+                if (focus) {
+                    console.log("CustomImageListView gained focus")
+                } else {
+                    console.log("CustomImageListView lost focus")
+                }
+            }
+
+
+            Component.onCompleted: {
+                console.log("Gallery component completed")
+                forceActiveFocus()
+            }
+        }
+    }
 
     // Metrics overlay
     MetricsOverlay {

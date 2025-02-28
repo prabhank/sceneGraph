@@ -1241,6 +1241,10 @@ void CustomImageListView::handleKeyAction(Qt::Key key)
 
 bool CustomImageListView::navigateLeft()
 {
+    if (m_currentIndex < 0 || m_imageData.isEmpty()) {
+        return false;
+    }
+
     QString currentCategory = m_imageData[m_currentIndex].category;
     int prevIndex = m_currentIndex - 1;
     
@@ -1263,10 +1267,29 @@ bool CustomImageListView::navigateLeft()
         if (m_imageData[prevIndex].category != currentCategory) {
             break;
         }
+        
+        // Get category dimensions for animation calculations
+        CategoryDimensions dims = getDimensionsForCategory(currentCategory);
+        
         setCurrentIndex(prevIndex);
-        ensureIndexVisible(prevIndex);
         ensureFocus();
         updateCurrentCategory();
+        
+        // Calculate scroll target position with animation
+        int itemsBeforeInCategory = 0;
+        for (int i = 0; i < prevIndex; i++) {
+            if (m_imageData[i].category == currentCategory) {
+                itemsBeforeInCategory++;
+            }
+        }
+        
+        qreal targetX = itemsBeforeInCategory * (dims.posterWidth + dims.itemSpacing);
+        targetX = qMax(0.0, targetX - (width() - dims.posterWidth) / 2);
+        
+        // Animate to target position
+        animateScroll(currentCategory, targetX);
+        
+        ensureIndexVisible(prevIndex);
         update();
         return true;
     }
@@ -1276,61 +1299,69 @@ bool CustomImageListView::navigateLeft()
 
 void CustomImageListView::navigateRight()
 {
+    if (m_currentIndex < 0 || m_imageData.isEmpty()) {
+        return;
+    }
+
     QString currentCategory = m_imageData[m_currentIndex].category;
     int nextIndex = m_currentIndex + 1;
     
+    // Check if we're at the rightmost item in the category
+    bool isRightmost = true;
+    for (int i = m_currentIndex + 1; i < m_imageData.size(); i++) {
+        if (m_imageData[i].category == currentCategory) {
+            isRightmost = false;
+            break;
+        }
+    }
+    
+    if (isRightmost) {
+        qDebug() << "At rightmost position, no action";
+        return;  // At rightmost position, do nothing
+    }
+    
+    // Handle navigation within the category
     while (nextIndex < m_imageData.size()) {
         if (m_imageData[nextIndex].category != currentCategory) {
             break;
         }
         
-        // Get category dimensions and calculate if scrolling is needed
+        // Get category dimensions for animation calculations
         CategoryDimensions dims = getDimensionsForCategory(currentCategory);
-        int itemsInCategory = 0;
-        int lastIndexInCategory = nextIndex;
         
-        // Count items in this category and find last index
-        for (int i = 0; i < m_imageData.size(); i++) {
-            if (m_imageData[i].category == currentCategory) {
-                itemsInCategory++;
-                lastIndexInCategory = i;
-            }
-        }
-        
+        // Update current index first
         setCurrentIndex(nextIndex);
-        ensureIndexVisible(nextIndex);
         ensureFocus();
         updateCurrentCategory();
         
         // Calculate scroll target position with animation
-        qreal totalWidth = itemsInCategory * dims.posterWidth + 
-                          (itemsInCategory - 1) * dims.itemSpacing;
-                          
-        if (totalWidth > width()) {
-            qreal targetX;
-            if (nextIndex == lastIndexInCategory) {
-                targetX = categoryContentWidth(currentCategory) - width();
-            } else {
-                int itemsBeforeInCategory = 0;
-                for (int i = 0; i < nextIndex; i++) {
-                    if (m_imageData[i].category == currentCategory) {
-                        itemsBeforeInCategory++;
-                    }
-                }
-                targetX = itemsBeforeInCategory * (dims.posterWidth + dims.itemSpacing);
-                targetX = qMax(0.0, targetX - (width() - dims.posterWidth) / 2);
+        int itemsBeforeInCategory = 0;
+        for (int i = 0; i < nextIndex; i++) {
+            if (m_imageData[i].category == currentCategory) {
+                itemsBeforeInCategory++;
             }
-            
-            // Animate to target position
-            animateScroll(currentCategory, targetX);
         }
         
+        qreal targetX = itemsBeforeInCategory * (dims.posterWidth + dims.itemSpacing);
+        
+        // Center the target item in view
+        targetX = qMax(0.0, targetX - (width() - dims.posterWidth) / 2);
+        
+        // Log animation details to diagnose issues
+        qDebug() << "Right navigation - target X:" << targetX 
+                 << "dims.posterWidth:" << dims.posterWidth
+                 << "Items before:" << itemsBeforeInCategory;
+        
+        // Animate to target position
+        animateScroll(currentCategory, targetX);
+        
+        // Call ensure visible after animation setup
+        ensureIndexVisible(nextIndex);
         update();
         return;
     }
 }
 
-// Update navigateUp and navigateDown methods
 void CustomImageListView::navigateUp()
 {
     if (m_currentIndex < 0 || m_rowTitles.isEmpty()) {
@@ -1344,16 +1375,19 @@ void CustomImageListView::navigateUp()
         QString prevCategory = m_rowTitles[categoryIndex - 1];
         CategoryDimensions prevDims = getDimensionsForCategory(prevCategory);
         
-        // Get current horizontal scroll position for the target category
-        qreal categoryScrollX = getCategoryContentX(prevCategory);
+        // Get current viewport horizontal boundaries
+        qreal viewportLeft = getCategoryContentX(prevCategory);
+        qreal viewportRight = viewportLeft + width();
+        qreal viewportCenterX = viewportLeft + width() / 2.0;
         
-        // Find first visible item in the previous category
-        int firstVisibleIndex = -1;
-        qreal bestDistance = std::numeric_limits<qreal>::max();
+        // First, find all visible items in the previous category
+        QList<int> visibleIndices;
+        QMap<int, qreal> itemCenterPositions; // Map to store item center positions
         
+        // Find visible items in target row
         for (int i = 0; i < m_imageData.size(); i++) {
             if (m_imageData[i].category == prevCategory) {
-                // Calculate item's x position
+                // Calculate item's position
                 int itemsBeforeThis = 0;
                 for (int j = 0; j < i; j++) {
                     if (m_imageData[j].category == prevCategory) {
@@ -1361,37 +1395,87 @@ void CustomImageListView::navigateUp()
                     }
                 }
                 
-                qreal itemX = itemsBeforeThis * (prevDims.posterWidth + prevDims.itemSpacing);
+                // Calculate item bounds
+                qreal itemLeft = m_startPositionX + 10 + 
+                                itemsBeforeThis * (prevDims.posterWidth + prevDims.itemSpacing);
+                qreal itemRight = itemLeft + prevDims.posterWidth;
+                qreal itemCenter = itemLeft + prevDims.posterWidth / 2.0;
                 
-                // Check if item is visible (considering scroll position)
-                if (itemX >= categoryScrollX && 
-                    itemX < (categoryScrollX + width() - prevDims.posterWidth)) {
-                    qreal distanceFromLeft = itemX - categoryScrollX;
-                    if (distanceFromLeft < bestDistance) {
-                        bestDistance = distanceFromLeft;
-                        firstVisibleIndex = i;
-                    }
+                // Store item center position
+                itemCenterPositions[i] = itemCenter;
+                
+                // Check if item would be visible after navigation
+                bool isVisible = (itemRight > viewportLeft && itemLeft < viewportRight);
+                
+                if (isVisible) {
+                    visibleIndices.append(i);
+                    qDebug() << "Visible item in prev category:" << i << "center:" << itemCenter;
                 }
             }
         }
         
-        // If we found a visible item, select it
-        if (firstVisibleIndex != -1) {
-            setCurrentIndex(firstVisibleIndex);
-            ensureIndexVisible(firstVisibleIndex);
-            ensureFocus();
-            update();
+        // Find best item to focus on
+        int bestMatchIndex = -1;
+        
+        if (!visibleIndices.isEmpty()) {
+            // Find most centered visible item
+            qreal bestDistance = std::numeric_limits<qreal>::max();
+            
+            for (int idx : visibleIndices) {
+                qreal itemCenter = itemCenterPositions[idx];
+                qreal distance = qAbs(itemCenter - viewportCenterX);
+                
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestMatchIndex = idx;
+                }
+            }
         } else {
-            // Fallback to first item in category if none are visible
+            // If no visible items, select first item in category
             for (int i = 0; i < m_imageData.size(); i++) {
                 if (m_imageData[i].category == prevCategory) {
-                    setCurrentIndex(i);
-                    ensureIndexVisible(i);
-                    ensureFocus();
-                    update();
+                    bestMatchIndex = i;
                     break;
                 }
             }
+        }
+        
+        // If we found a match, navigate to it
+        if (bestMatchIndex != -1) {
+            qDebug() << "Up navigation selected item:" << bestMatchIndex;
+            
+            // Calculate target Y position
+            qreal targetY = calculateItemVerticalPosition(bestMatchIndex);
+            
+            // Center vertically
+            qreal centerOffset = (height() - prevDims.posterHeight) / 2;
+            targetY = qMax(0.0, targetY - centerOffset);
+            
+            // Animate only the vertical scroll
+            animateVerticalScroll(targetY);
+            
+            // Update current index
+            setCurrentIndex(bestMatchIndex);
+            ensureFocus();
+            updateCurrentCategory();
+            
+            // If the selected item isn't visible, ensure it becomes visible
+            int itemsBeforeThis = 0;
+            for (int i = 0; i < bestMatchIndex; i++) {
+                if (m_imageData[i].category == prevCategory) {
+                    itemsBeforeThis++;
+                }
+            }
+            
+            qreal itemLeft = itemsBeforeThis * (prevDims.posterWidth + prevDims.itemSpacing);
+            if (!visibleIndices.contains(bestMatchIndex)) {
+                // If item wasn't visible, scroll to make it visible
+                qreal targetX = itemLeft - (width() - prevDims.posterWidth) / 2;
+                targetX = qBound(0.0, targetX, qMax(0.0, categoryContentWidth(prevCategory) - width()));
+                animateScroll(prevCategory, targetX);
+            }
+            
+            update();
         }
     }
 }
@@ -1409,16 +1493,19 @@ void CustomImageListView::navigateDown()
         QString nextCategory = m_rowTitles[categoryIndex + 1];
         CategoryDimensions nextDims = getDimensionsForCategory(nextCategory);
         
-        // Get current horizontal scroll position for the target category
-        qreal categoryScrollX = getCategoryContentX(nextCategory);
+        // Get current viewport horizontal boundaries
+        qreal viewportLeft = getCategoryContentX(nextCategory);
+        qreal viewportRight = viewportLeft + width();
+        qreal viewportCenterX = viewportLeft + width() / 2.0;
         
-        // Find first visible item in the next category
-        int firstVisibleIndex = -1;
-        qreal bestDistance = std::numeric_limits<qreal>::max();
+        // First, find all visible items in the next category
+        QList<int> visibleIndices;
+        QMap<int, qreal> itemCenterPositions; // Map to store item center positions
         
+        // Find visible items in target row
         for (int i = 0; i < m_imageData.size(); i++) {
             if (m_imageData[i].category == nextCategory) {
-                // Calculate item's x position
+                // Calculate item's position
                 int itemsBeforeThis = 0;
                 for (int j = 0; j < i; j++) {
                     if (m_imageData[j].category == nextCategory) {
@@ -1426,37 +1513,87 @@ void CustomImageListView::navigateDown()
                     }
                 }
                 
-                qreal itemX = itemsBeforeThis * (nextDims.posterWidth + nextDims.itemSpacing);
+                // Calculate item bounds
+                qreal itemLeft = m_startPositionX + 10 + 
+                                itemsBeforeThis * (nextDims.posterWidth + nextDims.itemSpacing);
+                qreal itemRight = itemLeft + nextDims.posterWidth;
+                qreal itemCenter = itemLeft + nextDims.posterWidth / 2.0;
                 
-                // Check if item is visible (considering scroll position)
-                if (itemX >= categoryScrollX && 
-                    itemX < (categoryScrollX + width() - nextDims.posterWidth)) {
-                    qreal distanceFromLeft = itemX - categoryScrollX;
-                    if (distanceFromLeft < bestDistance) {
-                        bestDistance = distanceFromLeft;
-                        firstVisibleIndex = i;
-                    }
+                // Store item center position
+                itemCenterPositions[i] = itemCenter;
+                
+                // Check if item would be visible after navigation
+                bool isVisible = (itemRight > viewportLeft && itemLeft < viewportRight);
+                
+                if (isVisible) {
+                    visibleIndices.append(i);
+                    qDebug() << "Visible item in next category:" << i << "center:" << itemCenter;
                 }
             }
         }
         
-        // If we found a visible item, select it
-        if (firstVisibleIndex != -1) {
-            setCurrentIndex(firstVisibleIndex);
-            ensureIndexVisible(firstVisibleIndex);
-            ensureFocus();
-            update();
+        // Find best item to focus on
+        int bestMatchIndex = -1;
+        
+        if (!visibleIndices.isEmpty()) {
+            // Find most centered visible item
+            qreal bestDistance = std::numeric_limits<qreal>::max();
+            
+            for (int idx : visibleIndices) {
+                qreal itemCenter = itemCenterPositions[idx];
+                qreal distance = qAbs(itemCenter - viewportCenterX);
+                
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestMatchIndex = idx;
+                }
+            }
         } else {
-            // Fallback to first item in category if none are visible
+            // If no visible items, select first item in category
             for (int i = 0; i < m_imageData.size(); i++) {
                 if (m_imageData[i].category == nextCategory) {
-                    setCurrentIndex(i);
-                    ensureIndexVisible(i);
-                    ensureFocus();
-                    update();
+                    bestMatchIndex = i;
                     break;
                 }
             }
+        }
+        
+        // If we found a match, navigate to it
+        if (bestMatchIndex != -1) {
+            qDebug() << "Down navigation selected item:" << bestMatchIndex;
+            
+            // Calculate target Y position
+            qreal targetY = calculateItemVerticalPosition(bestMatchIndex);
+            
+            // Center vertically
+            qreal centerOffset = (height() - nextDims.posterHeight) / 2;
+            targetY = qMax(0.0, targetY - centerOffset);
+            
+            // Animate only the vertical scroll
+            animateVerticalScroll(targetY);
+            
+            // Update current index
+            setCurrentIndex(bestMatchIndex);
+            ensureFocus();
+            updateCurrentCategory();
+            
+            // If the selected item isn't visible, ensure it becomes visible
+            int itemsBeforeThis = 0;
+            for (int i = 0; i < bestMatchIndex; i++) {
+                if (m_imageData[i].category == nextCategory) {
+                    itemsBeforeThis++;
+                }
+            }
+            
+            qreal itemLeft = itemsBeforeThis * (nextDims.posterWidth + nextDims.itemSpacing);
+            if (!visibleIndices.contains(bestMatchIndex)) {
+                // If item wasn't visible, scroll to make it visible
+                qreal targetX = itemLeft - (width() - nextDims.posterWidth) / 2;
+                targetX = qBound(0.0, targetX, qMax(0.0, categoryContentWidth(nextCategory) - width()));
+                animateScroll(nextCategory, targetX);
+            }
+            
+            update();
         }
     }
 }
@@ -2033,34 +2170,71 @@ void CustomImageListView::setupNetworkManager()
 
 void CustomImageListView::setupScrollAnimation()
 {
-    // Create a reusable animation object
+    // Create a reusable animation object for vertical scrolling
     m_scrollAnimation = new QPropertyAnimation(this);
-    m_scrollAnimation->setDuration(300);  // 300ms duration
+    m_scrollAnimation->setDuration(300);
     m_scrollAnimation->setEasingCurve(QEasingCurve::OutCubic);
+    
+    // Initialize dynamic property for both directions
+    setProperty("contentX", QVariant(0.0));
+    setProperty("contentY", QVariant(0.0));
 }
 
 void CustomImageListView::animateScroll(const QString& category, qreal targetX)
 {
-    // Stop any existing animation
+    // Stop any existing animation first
     stopCurrentAnimation();
+    
+    // Ensure we don't exceed bounds
+    targetX = qBound(0.0, targetX, qMax(0.0, categoryContentWidth(category) - width()));
     
     // Create a new animation for this category if it doesn't exist
     if (!m_categoryAnimations.contains(category)) {
         QPropertyAnimation* anim = new QPropertyAnimation(this);
         anim->setDuration(300);
         anim->setEasingCurve(QEasingCurve::OutCubic);
-        m_categoryAnimations[category] = anim;
         
-        // Connect animation to update the scroll position
-        connect(anim, &QPropertyAnimation::valueChanged, this, [this, category](const QVariant& value) {
-            setCategoryContentX(category, value.toReal());
-        });
+        // We need a unique property name that doesn't include special characters
+        QString propName = "scrollPos_" + QString::number(qHash(category));
+        
+        // Initialize the dynamic property
+        setProperty(propName.toLatin1().constData(), getCategoryContentX(category));
+        
+        // Configure animation
+        anim->setTargetObject(this);
+        anim->setPropertyName(propName.toLatin1());
+        
+        // Store the hash and category in the animation object
+        anim->setProperty("categoryHash", qHash(category));
+        anim->setProperty("category", category);
+        
+        // Connect using old-style signal/slot for Qt 5.6 compatibility
+        connect(anim, SIGNAL(valueChanged(QVariant)), this, SLOT(onScrollAnimationValueChanged(QVariant)));
+        
+        m_categoryAnimations[category] = anim;
     }
     
+    // Get the animation for this category
     QPropertyAnimation* anim = m_categoryAnimations[category];
-    anim->stop();
-    anim->setStartValue(getCategoryContentX(category));
-    anim->setEndValue(targetX);
+    if (!anim) return;
+    
+    // Update the property before starting the animation
+    QString propName = "scrollPos_" + QString::number(qHash(category));
+    setProperty(propName.toLatin1().constData(), getCategoryContentX(category));
+    
+    // Ensure animation is stopped
+    if (anim->state() == QPropertyAnimation::Running) {
+        anim->stop();
+    }
+    
+    // Configure and start
+    anim->setStartValue(QVariant(getCategoryContentX(category)));
+    anim->setEndValue(QVariant(targetX));
+    
+    qDebug() << "Starting scroll animation for category:" << category 
+             << "from:" << getCategoryContentX(category) 
+             << "to:" << targetX;
+             
     anim->start();
 }
 
@@ -2230,5 +2404,27 @@ void CustomImageListView::safeCleanup()
     
     // Reset tracking state
     cleaningInProgress = false;
+}
+
+void CustomImageListView::animateVerticalScroll(qreal targetY)
+{
+    // Stop any running vertical animations
+    if (m_scrollAnimation && m_scrollAnimation->state() == QPropertyAnimation::Running) {
+        m_scrollAnimation->stop();
+    }
+    
+    // Ensure we don't exceed bounds
+    targetY = qBound(0.0, targetY, qMax(0.0, contentHeight() - height()));
+    
+    // Configure the animation
+    m_scrollAnimation->setTargetObject(this);
+    m_scrollAnimation->setPropertyName("contentY");
+    m_scrollAnimation->setStartValue(m_contentY);
+    m_scrollAnimation->setEndValue(targetY);
+    
+    qDebug() << "Starting vertical scroll animation from:" << m_contentY << "to:" << targetY;
+    
+    // Start the animation
+    m_scrollAnimation->start();
 }
 
