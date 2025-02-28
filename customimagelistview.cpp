@@ -29,6 +29,10 @@
 #include <QNetworkReply>
 #include <QSslSocket>
 #include <QtNetwork/QSslConfiguration>
+#include <QRunnable>  // Add this line to include QRunnable
+#include <QPointer>
+
+
 
 //Q_LOGGING_CATEGORY(ihScheduleModel2, "custom", QtDebugMsg)
 
@@ -68,6 +72,33 @@ CustomImageListView::CustomImageListView(QQuickItem *parent)
     setupScrollAnimation();
 }
 
+CustomImageListView::~CustomImageListView()
+{
+    // Mark as being destroyed first
+    m_isBeingDestroyed = true;
+    
+    // Critical step: ensure scene graph isn't rendering our nodes
+    QQuickWindow* win = window();
+    if (win) {
+        // Disconnect signals in Qt 5.6 compatible way
+        disconnect(win, SIGNAL(beforeRendering()), this, nullptr);
+        disconnect(win, SIGNAL(afterRendering()), this, nullptr);
+        
+        // Block scene graph updates for our item
+        setVisible(false);
+        setEnabled(false);
+        
+        // Force update to apply visibility change before cleanup
+        win->update();
+        
+        // Wait for update to be processed
+        QCoreApplication::processEvents();
+    }
+    
+    // Safe cleanup with proper barriers
+    safeCleanup();
+}
+
 void CustomImageListView::componentComplete()
 {
     QQuickItem::componentComplete();
@@ -98,7 +129,7 @@ void CustomImageListView::geometryChanged(const QRectF &newGeometry, const QRect
     }
 }
 
-// Update loadAllImages method
+// Replace the loadAllImages method with this improved version
 void CustomImageListView::loadAllImages()
 {
     if (!isReadyForTextures()) {
@@ -108,7 +139,7 @@ void CustomImageListView::loadAllImages()
         return;
     }
 
-    // Calculate layout with reduced spacing
+    // Calculate layout and total item count
     qreal currentY = 0;
     int totalItems = 0;
 
@@ -122,73 +153,125 @@ void CustomImageListView::loadAllImages()
             }
         }
         
-        // Add category title height with reduced spacing
-        currentY += m_titleHeight; // Using reduced title height
-        
-        // Add height for all items in category
+        currentY += m_titleHeight; 
         currentY += itemsInCategory * (m_itemHeight + m_spacing);
-        
-        // Add reduced spacing between categories
         currentY += m_rowSpacing;
     }
 
-    // Load all images
-    for (int i = 0; i < m_count; i++) {
-        loadImage(i);
-    }
-
-    // Update content height
+    // Update content height and count
     setImplicitHeight(currentY);
     m_count = totalItems;
-}
-
-CustomImageListView::~CustomImageListView()
-{
-    m_isBeingDestroyed = true;
-    safeCleanup();
-}
-
-void CustomImageListView::safeCleanup()
-{
-    // Stop any pending animations
-    if (m_scrollAnimation) {
-        m_scrollAnimation->stop();
-        delete m_scrollAnimation;
-        m_scrollAnimation = nullptr;
-    }
-
-    // Clear category animations
-    qDeleteAll(m_categoryAnimations);
-    m_categoryAnimations.clear();
-
-    // Cancel pending network requests
-    for (QNetworkReply* reply : m_pendingRequests) {
-        if (reply) {
-            reply->abort();
-            reply->deleteLater();
-        }
-    }
-    m_pendingRequests.clear();
-
-    // Clear URL cache
-    m_urlImageCache.clear();
-
-    // Clean up textures
-    QMutexLocker locker(&m_loadMutex);
-    for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
-        if (it.value().node) {
-            delete it.value().node;
-            it.value().node = nullptr;
-        }
-        // Don't delete textures here as they belong to the window
-        it.value().texture = nullptr;
-    }
-    m_nodes.clear();
     
-    // Clear data
-    m_imageData.clear();
-    m_rowTitles.clear();
-    m_categoryContentX.clear();
+    // Get list of visible indices first
+    QVector<int> visibleIndices = getVisibleIndices();
+    QVector<int> offscreenIndices;
+    
+    // Add all other indices to the offscreen list
+    for (int i = 0; i < m_count; i++) {
+        if (!visibleIndices.contains(i)) {
+            offscreenIndices.append(i);
+        }
+    }
+    
+    qDebug() << "Loading" << visibleIndices.size() << "visible images first, then" 
+             << offscreenIndices.size() << "offscreen images";
+    
+    // First load all visible images
+    for (int index : visibleIndices) {
+        loadImage(index);
+    }
+    
+    // Then queue off-screen images with a delay to prevent blocking UI
+    for (int i = 0; i < offscreenIndices.size(); i++) {
+        int index = offscreenIndices[i];
+        // Spread out loading of offscreen images to prevent overloading
+        QTimer::singleShot(50 * (i + 1), this, [this, index]() {
+            if (!m_isBeingDestroyed) {
+                loadImage(index);
+            }
+        });
+    }
+}
+
+// Add this new method to determine which indices are visible
+QVector<int> CustomImageListView::getVisibleIndices()
+{
+    QVector<int> visibleIndices;
+    
+    if (width() <= 0 || height() <= 0) {
+        return visibleIndices;
+    }
+    
+    // Define the viewport boundaries
+    qreal viewportTop = m_contentY;
+    qreal viewportBottom = m_contentY + height();
+    
+    qreal currentY = 0;
+    int currentIndex = 0;
+    
+    // Iterate through categories
+    for (int categoryIndex = 0; categoryIndex < m_rowTitles.size(); ++categoryIndex) {
+        QString categoryName = m_rowTitles[categoryIndex];
+        CategoryDimensions dims = getDimensionsForCategory(categoryName);
+        
+        // Add title height
+        currentY += m_titleHeight + 10; // Same spacing as in updatePaintNode
+        
+        // Skip if entire category is below viewport
+        if (currentY > viewportBottom) {
+            // Skip to next category after counting items in this one
+            for (const ImageData &imgData : m_imageData) {
+                if (imgData.category == categoryName) {
+                    currentIndex++;
+                }
+            }
+            // Add category height and continue
+            currentY += dims.rowHeight + m_rowSpacing;
+            continue;
+        }
+        
+        // Calculate category end position
+        qreal categoryEndY = currentY + dims.rowHeight;
+        
+        // Skip if entire category is above viewport
+        if (categoryEndY < viewportTop) {
+            // Skip this category
+            for (const ImageData &imgData : m_imageData) {
+                if (imgData.category == categoryName) {
+                    currentIndex++;
+                }
+            }
+            currentY = categoryEndY + m_rowSpacing;
+            continue;
+        }
+        
+        // Category is visible (at least partially), check each item
+        qreal xPos = m_startPositionX + 10; // Same as in updatePaintNode
+        qreal categoryX = xPos - getCategoryContentX(categoryName);
+        int itemsInThisCategory = 0;
+        
+        for (int i = 0; i < m_imageData.size(); i++) {
+            if (m_imageData[i].category == categoryName) {
+                // Item is in this category, check if it's visible
+                if (currentY >= viewportTop - dims.posterHeight && 
+                    currentY <= viewportBottom + dims.posterHeight &&
+                    categoryX >= -dims.posterWidth &&
+                    categoryX <= width() + dims.posterWidth) {
+                    
+                    visibleIndices.append(currentIndex);
+                }
+                
+                categoryX += dims.posterWidth + dims.itemSpacing;
+                currentIndex++;
+                itemsInThisCategory++;
+            }
+        }
+        
+        // Move to next category
+        currentY = categoryEndY + m_rowSpacing;
+    }
+    
+    return visibleIndices;
 }
 
 void CustomImageListView::safeReleaseTextures()
@@ -398,7 +481,7 @@ bool CustomImageListView::isReadyForTextures() const
 
 void CustomImageListView::loadImage(int index)
 {
-    if (m_isDestroying || !ensureValidWindow() || index >= m_imageData.size()) {
+    if (m_isBeingDestroyed || !ensureValidWindow() || index >= m_imageData.size()) {
         return;
     }
 
@@ -526,16 +609,43 @@ void CustomImageListView::loadUrlImage(int index, const QUrl &url)
         request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
         request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
         
-        // Cancel any existing request
-        if (m_pendingRequests.contains(index)) {
-            m_pendingRequests[index]->abort();
-            m_pendingRequests[index]->deleteLater();
-            m_pendingRequests.remove(index);
+        QNetworkReply* oldReply = nullptr;
+        
+        // Only lock mutex for the map operations
+        {
+            QMutexLocker locker(&m_networkMutex);
+            
+            // Store old reply for later deletion outside the lock
+            if (m_pendingRequests.contains(index)) {
+                oldReply = m_pendingRequests.take(index);
+            }
         }
-
-        // Create and store network reply
+        
+        // Cancel old request outside the mutex lock
+        if (oldReply) {
+            oldReply->disconnect(); // Prevent callbacks
+            oldReply->abort();
+            oldReply->deleteLater();
+        }
+      
+      
+    #ifndef QT_NO_SSL
+        if (finalUrl.scheme() == "https") {
+            QSslConfiguration sslConfig = request.sslConfiguration();
+            sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
+            sslConfig.setProtocol(QSsl::TlsV1_0);
+            request.setSslConfiguration(sslConfig);
+        }
+    #endif
+          
+        // Create network reply
         QNetworkReply *reply = m_networkManager->get(request);
-        m_pendingRequests[index] = reply;
+        
+        // Store the reply in our map with minimal lock time
+        {
+            QMutexLocker locker(&m_networkMutex);
+            m_pendingRequests[index] = reply;
+        }
         
         // Connect signals with Qt 5.6 compatible syntax
         connect(reply, SIGNAL(finished()), this, SLOT(onNetworkReplyFinished()));
@@ -549,7 +659,9 @@ void CustomImageListView::loadUrlImage(int index, const QUrl &url)
     } else {
         qWarning() << "Unsupported URL scheme:" << finalUrl.scheme();
         createFallbackTexture(index);
+
     }
+
 }
 
 void CustomImageListView::processLoadedImage(int index, const QImage &image)
@@ -646,15 +758,14 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
     }
 
     // Calculate title width based on text content
-    static const QFont titleFont("Arial", 24, QFont::Bold);
-    QFontMetrics metrics(titleFont);
-    int textWidth = metrics.width(text) + 20;  // Add 20px padding
+    QFont titleFont("Roboto", 20, QFont::Bold);  // Using Roboto font, size 20, bold
+    QFontMetrics fm(titleFont);
+    int textWidth = fm.width(text) + 20;  // Add 20px padding
     int width = qMax(textWidth, static_cast<int>(std::ceil(rect.width())));
     int height = qMax(1, static_cast<int>(std::ceil(rect.height())));
 
     QImage textImage(width, height, QImage::Format_ARGB32_Premultiplied);
     if (textImage.isNull()) {
-        qWarning() << "Failed to create text image with size:" << width << "x" << height;
         return nullptr;
     }
 
@@ -662,24 +773,17 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
 
     QPainter painter;
     if (!painter.begin(&textImage)) {
-        qWarning() << "Failed to start painting on image";
         return nullptr;
     }
 
-    // Configure text rendering
+    // Configure text rendering with focus properties
     painter.setFont(titleFont);
-    painter.setPen(Qt::white);
+    painter.setPen(QColor("#ebebeb"));  // Set focus color
     painter.setRenderHints(QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
 
-    // Use classification ID as the row title
-    QString displayText = text;
-    if (displayText == "Default") {
-        displayText = "Featured"; // Optional: provide friendly name for default category
-    }
-    
     // Draw text with left alignment and vertical centering
-    int yPos = (height + metrics.ascent() - metrics.descent()) / 2;
-    painter.drawText(10, yPos, displayText); // Add 10px left margin
+    int yPos = (height + fm.ascent() - fm.descent()) / 2;
+    painter.drawText(10, yPos, text);
     
     painter.end();
 
@@ -690,20 +794,34 @@ QSGGeometryNode* CustomImageListView::createRowTitleNode(const QString &text, co
     );
 
     if (!texture) {
-        qWarning() << "Failed to create texture for row title";
         return nullptr;
     }
 
-    // Create rect with adjusted width based on text content
-    QRectF adjustedRect(rect.x(), rect.y(), textWidth, rect.height());
+    // Create adjusted rect with 8 pixels left offset
+    QRectF adjustedRect(rect.x() - 8, rect.y(), textWidth, rect.height());
     return createTexturedRect(adjustedRect, texture);
 }
 
 // Fix the return type from void to QSGNode*
 QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeData *)
 {
-    if (!window() || !window()->isExposed()) {
-        delete oldNode;
+    // Return null immediately if we're being destroyed to prevent render thread from accessing nodes
+    if (m_isBeingDestroyed || !window() || !window()->isExposed()) {
+        if (oldNode) {
+            // Use a safer way to delete the node tree that won't crash during render
+            oldNode->markDirty(QSGNode::DirtySubtreeBlocked); // Block rendering of this subtree
+            
+            // Schedule node deletion for next frame when render thread is done with it
+            QQuickWindow *win = window();
+            if (win) {
+                // Create and schedule a SafeNodeDeleter to handle cleanup
+                win->scheduleRenderJob(new SafeNodeDeleter(oldNode), 
+                                     QQuickWindow::BeforeSynchronizingStage);
+            }
+            
+            // Don't delete here - let the scene graph handle it
+            return nullptr;
+        }
         return nullptr;
     }
     
@@ -778,7 +896,7 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
                 }
 
                 // Add title overlay
-                addTitleOverlay(itemContainer, rect, imgData.title);
+                //addTitleOverlay(itemContainer, rect, imgData.title);
 
                 // Add the container to parent
                 parentNode->appendChildNode(itemContainer);
@@ -811,6 +929,8 @@ QSGNode* CustomImageListView::updatePaintNode(QSGNode *oldNode, UpdatePaintNodeD
 // Helper method for selection effects
 void CustomImageListView::addSelectionEffects(QSGNode* container, const QRectF& rect)
 {
+    if (m_isBeingDestroyed) return;
+    
     // Calculate scaled dimensions for focus border to match zoomed asset
     const float scaleFactor = 1.1f;  // Match the zoom factor from createTexturedRect
     qreal widthDiff = rect.width() * (scaleFactor - 1.0f);
@@ -945,14 +1065,36 @@ void CustomImageListView::debugResourceSystem() const
 
 void CustomImageListView::itemChange(ItemChange change, const ItemChangeData &data)
 {
-    QQuickItem::itemChange(change, data);
+    // If we're removed from scene, mark destruction and clean up
     if (change == ItemSceneChange) {
-        m_windowReady = (data.window != nullptr);
-        if (m_windowReady) {
-            initializeGL();  // Initialize OpenGL when window is ready
-            tryLoadImages();
+        if (data.window == nullptr) {
+            // Item being removed from scene
+            m_isBeingDestroyed = true;
+            
+            // Block rendering before cleanup
+            setVisible(false);
+            
+            // Ensure nodes won't be accessed
+            QQuickWindow* oldWindow = window();
+            if (oldWindow) {
+                disconnect(oldWindow, SIGNAL(beforeRendering()), this, nullptr);
+                disconnect(oldWindow, SIGNAL(afterRendering()), this, nullptr);
+                
+                // Force update to apply visibility change
+                oldWindow->update();
+            }
+            
+            // Use QPointer to safely track object lifetime
+            QPointer<CustomImageListView> safeThis = this;
+            QTimer::singleShot(0, [safeThis]() {
+                // Only call safeCleanup if the object still exists
+                if (safeThis) {
+                    safeThis->safeCleanup();
+                }
+            });
         }
     }
+    QQuickItem::itemChange(change, data);
 }
 
 void CustomImageListView::tryLoadImages()
@@ -975,6 +1117,25 @@ void CustomImageListView::setCurrentIndex(int index)
     if (m_currentIndex != index && index >= 0 && index < m_count) {
         m_currentIndex = index;
         updateCurrentCategory();
+        
+        // Emit full JSON data when focus changes
+        if (index < m_imageData.size()) {
+            const ImageData &currentItem = m_imageData[index];
+            
+            // Find original JSON object
+            QJsonArray items = m_parsedJson["menuItems"].toObject()["items"].toArray();
+            for (const QJsonValue &rowVal : items) {
+                QJsonArray rowItems = rowVal.toObject()["items"].toArray();
+                for (const QJsonValue &itemVal : rowItems) {
+                    QJsonObject item = itemVal.toObject();
+                    if (item["title"].toString() == currentItem.title) {
+                        emit assetFocused(item);
+                        break;
+                    }
+                }
+            }
+        }
+        
         emit currentIndexChanged();
         update();
     }
@@ -1023,21 +1184,49 @@ void CustomImageListView::handleKeyAction(Qt::Key key)
     }
 
     const ImageData &currentItem = m_imageData[m_currentIndex];
-    qDebug() << "Handling key action for item:" << currentItem.title;
-    qDebug() << "Available links:" << currentItem.links;
     
-    if (key == Qt::Key_Return || key == Qt::Key_Enter || key == Qt::Key_Space) {
-        // Try OK action
-        if (currentItem.links.contains("OK")) {
-            qDebug() << "Emitting OK link:" << currentItem.links["OK"];
-            emit linkActivated("OK", currentItem.links["OK"]);
-        }
-    }
-    else if (key == Qt::Key_I) {
-        // Try info action
-        if (currentItem.links.contains("INFO")) {
-            qDebug() << "Emitting info link:" << currentItem.links["INFO"];
-            emit linkActivated("INFO", currentItem.links["INFO"]);
+    // Find the complete JSON object for current item
+    QJsonArray rows = m_parsedJson["menuItems"].toObject()["items"].toArray();
+    for (const QJsonValue &rowVal : rows) {
+        QJsonArray items = rowVal.toObject()["items"].toArray();
+        for (const QJsonValue &itemVal : items) {
+            QJsonObject item = itemVal.toObject();
+            if (item["title"].toString() == currentItem.title) {
+                // Found matching item, now handle the action
+                if (key == Qt::Key_Return || key == Qt::Key_Space) {
+                    QJsonObject actionData;
+                    actionData["action"] = "OK";
+                    actionData["title"] = item["title"].toString();
+                    actionData["description"] = item["shortSynopsis"].toString();
+                    actionData["category"] = currentItem.category;
+                    actionData["id"] = item["assetType"].toString();
+                    actionData["thumbnailUrl"] = item["thumbnailUri"].toString();
+                    actionData["moodImageUri"] = item["moodImageUri"].toString();
+                    
+                    // Add complete links array from original JSON
+                    actionData["links"] = item["links"];
+                    
+                    qDebug() << "Emitting action data:" << actionData;
+                    emit linkActivated("OK", QJsonDocument(actionData).toJson(QJsonDocument::Compact));
+                }
+                else if (key == Qt::Key_I) {
+                    QJsonObject actionData;
+                    actionData["action"] = "info";
+                    actionData["title"] = item["title"].toString();
+                    actionData["description"] = item["shortSynopsis"].toString();
+                    actionData["category"] = currentItem.category;
+                    actionData["id"] = item["assetType"].toString();
+                    actionData["thumbnailUrl"] = item["thumbnailUri"].toString();
+                    actionData["moodImageUri"] = item["moodImageUri"].toString();
+                    
+                    // Add complete links array from original JSON
+                    actionData["links"] = item["links"];
+                    
+                    qDebug() << "Emitting action data:" << actionData;
+                    emit linkActivated("info", QJsonDocument(actionData).toJson(QJsonDocument::Compact));
+                }
+                break;
+            }
         }
     }
 }
@@ -1356,6 +1545,10 @@ bool CustomImageListView::event(QEvent *e)
     if (e->type() == QEvent::FocusIn || e->type() == QEvent::FocusOut) {
         update();
     }
+    if (e->type() == QEvent::DeferredDelete && !m_isBeingDestroyed) {
+        m_isBeingDestroyed = true;
+        safeCleanup();
+    }
     return QQuickItem::event(e);
 }
 
@@ -1414,6 +1607,10 @@ void CustomImageListView::setContentY(qreal y)
     if (m_contentY != y) {
         m_contentY = y;
         emit contentYChanged();
+        
+        // Add this call to check visibility on scroll
+        handleContentPositionChange();
+        
         update();
     }
 }
@@ -1625,10 +1822,10 @@ void CustomImageListView::processJsonData(const QByteArray &data)
         return;
     }
 
-    QJsonObject root = doc.object();
+    m_parsedJson = doc.object();  // Store the complete JSON object
     
     // Get menuItems object first
-    QJsonObject menuItems = root["menuItems"].toObject();
+    QJsonObject menuItems = m_parsedJson["menuItems"].toObject();
     if (menuItems.isEmpty()) {
         qWarning() << "menuItems object is empty or invalid";
         return;
@@ -1753,47 +1950,20 @@ void CustomImageListView::addDefaultItems()
     update();
 }
 
-void CustomImageListView::initializeGL()
-{
-    if (!window()) return;
-
-    // Set environment variables for debugging
-    qputenv("QSG_INFO", "1");
-    qputenv("QT_LOGGING_RULES", "qt.scenegraph.general=true");
-
-    // Set OpenGL attributes
-    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
-    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-
-    // Force software rendering for embedded systems
-    qputenv("QT_QUICK_BACKEND", "software");
-    
-    // Connect to window's sceneGraphInitialized signal
-    connect(window(), &QQuickWindow::beforeRendering, this, [this]() {
-        // Verify OpenGL context
-        QOpenGLContext *context = window()->openglContext();
-        if (context) {
-            qDebug() << "OpenGL Version:" << context->format().majorVersion() 
-                     << "." << context->format().minorVersion();
-            qDebug() << "Using OpenGL:" << context->isValid();
-            
-            // Set up surface format
-            QSurfaceFormat format = context->format();
-            format.setRenderableType(QSurfaceFormat::OpenGLES);
-            format.setVersion(2, 0);
-            format.setSwapInterval(1);
-            format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-            window()->setFormat(format);
-        }
-    }, Qt::DirectConnection);
-}
 
 // Add helper methods for per-category scrolling
 void CustomImageListView::setCategoryContentX(const QString& category, qreal x)
 {
-    m_categoryContentX[category] = x;
-    update();
+    if (m_categoryContentX.value(category, 0.0) != x) {
+        m_categoryContentX[category] = x;
+        
+        // Only trigger visibility check when scrolling the current category
+        if (category == m_currentCategory) {
+            handleContentPositionChange();
+        }
+        
+        update();
+    }
 }
 
 qreal CustomImageListView::getCategoryContentX(const QString& category) const
@@ -1824,15 +1994,15 @@ void CustomImageListView::setupNetworkManager()
 {
     if (!m_networkManager) return;
     
-    // Configure network manager for Qt 5.6
+    // Configure network settings for embedded systems
     m_networkManager->setConfiguration(QNetworkConfiguration());
     m_networkManager->setNetworkAccessible(QNetworkAccessManager::Accessible);
-
-    // Enable SSL
+    
+    // Enable SSL/HTTPS support
     #ifndef QT_NO_SSL
         QSslConfiguration sslConfig = QSslConfiguration::defaultConfiguration();
-        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);
-        sslConfig.setProtocol(QSsl::TlsV1_0);
+        sslConfig.setPeerVerifyMode(QSslSocket::VerifyNone);  // Required for self-signed certs
+        sslConfig.setProtocol(QSsl::TlsV1_0);  // Use TLS 1.0 for maximum compatibility
         QSslConfiguration::setDefaultConfiguration(sslConfig);
     #endif
 }
@@ -1905,5 +2075,136 @@ void CustomImageListView::setEnableTextureMetrics(bool enable)
         emit enableTextureMetricsChanged();
         update();
     }
+}
+
+void CustomImageListView::handleContentPositionChange()
+{
+    // Don't proceed if we're being destroyed
+    if (m_isBeingDestroyed) {
+        return;
+    }
+    
+    // Update loading priorities based on new visible area
+    QVector<int> visibleIndices = getVisibleIndices();
+    
+    // Prioritize loading visible images first
+    for (int index : visibleIndices) {
+        if (index >= 0 && index < m_imageData.size() && !m_nodes.contains(index)) {
+            // Use a short delay to avoid blocking UI during scrolling
+            QTimer::singleShot(10, this, [this, index]() {
+                if (!m_isBeingDestroyed) {
+                    loadImage(index);
+                }
+            });
+        }
+    }
+}
+
+// Fix the safeCleanup method - ensuring it's complete
+void CustomImageListView::safeCleanup()
+{
+    // Use a static guard to prevent reentrant calls
+    static bool cleaningInProgress = false;
+    if (cleaningInProgress) {
+        return; // Prevent recursive cleanup
+    }
+    cleaningInProgress = true;
+    
+    // First mark destruction flag to prevent further rendering
+    m_isBeingDestroyed = true;
+    
+    // Critical step: make item invisible to prevent it from being rendered
+    setVisible(false);
+    setEnabled(false);
+    
+    // Unregister from render thread by ensuring item isn't part of scene graph
+    QQuickWindow* win = window();
+    if (win) {
+        // Use Qt 5.6 compatible syntax
+        disconnect(win, SIGNAL(beforeRendering()), this, nullptr);
+        disconnect(win, SIGNAL(afterRendering()), this, nullptr);
+        disconnect(win, SIGNAL(sceneGraphInitialized()), this, nullptr);
+        
+        // Force a sync/render cycle to apply visibility change before we touch the nodes
+        win->update();
+        
+        // For Qt 5.6, we need to ensure the update is processed
+        QCoreApplication::processEvents();
+    }
+    
+    // Stop any pending animations first - they could trigger updates
+    if (m_scrollAnimation) {
+        m_scrollAnimation->stop();
+        delete m_scrollAnimation;
+        m_scrollAnimation = nullptr;
+    }
+
+    // Clear category animations
+    QList<QPropertyAnimation*> animations = m_categoryAnimations.values();
+    m_categoryAnimations.clear();
+    for (QPropertyAnimation* anim : animations) {
+        anim->stop();
+        delete anim;
+    }
+
+    // Handle network cleanup - collect replies first
+    QList<QNetworkReply*> pendingReplies;
+    {
+        QMutexLocker networkLocker(&m_networkMutex);
+        pendingReplies = m_pendingRequests.values();
+        m_pendingRequests.clear();
+    }
+
+    // Process replies outside the lock
+    for (QNetworkReply* reply : pendingReplies) {
+        if (reply) {
+            reply->disconnect();
+            reply->abort();
+            reply->deleteLater();
+        }
+    }
+
+    // Clear URL cache to free memory
+    m_urlImageCache.clear();
+
+    // Add memory barrier before texture operations to ensure 
+    // rendering thread isn't accessing textures
+    QCoreApplication::processEvents();
+
+    // Critical section for safe node handling
+    {
+        QMutexLocker locker(&m_loadMutex);
+        
+        // Create a list of nodes to be safely deleted
+        QList<QSGNode*> nodesToDelete;
+        
+        // First collect all nodes to be deleted
+        for (auto it = m_nodes.begin(); it != m_nodes.end(); ++it) {
+            if (it.value().node) {
+                nodesToDelete.append(it.value().node);
+                // Just clear pointer immediately to prevent any further access
+                it.value().node = nullptr;
+            }
+            // Just nullify the texture pointer (window owns the texture)
+            it.value().texture = nullptr;
+        }
+        
+        // Schedule deletion of collected nodes when safe
+        if (win && !nodesToDelete.isEmpty()) {
+            // Schedule a safe batch deletion job
+            win->scheduleRenderJob(new SafeNodeBatchDeleter(nodesToDelete),
+                                 QQuickWindow::BeforeRenderingStage);
+        }
+        
+        m_nodes.clear();
+    }
+    
+    // Clear data structures that might be accessed from other methods
+    m_imageData.clear();
+    m_rowTitles.clear();
+    m_categoryContentX.clear();
+    
+    // Reset tracking state
+    cleaningInProgress = false;
 }
 

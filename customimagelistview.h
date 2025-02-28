@@ -23,9 +23,46 @@
 #include <QSslError>
 #include <QPropertyAnimation>  // Add this include
 #include <QSet>  // Add this include
+#include <QRunnable>  // Add this line to include QRunnable
+#include <QPointer>
+
+
 
 class QSGTexture;
 class QSGGeometry;
+
+// Add this better SafeNodeDeleter definition
+class SafeNodeDeleter : public QRunnable {
+    public:
+        explicit SafeNodeDeleter(QSGNode* node) : m_node(node) {}
+        
+        void run() override {
+            if (m_node) {
+                delete m_node;
+            }
+        }
+        
+    private:
+        QSGNode* m_node;
+};
+
+// Add this new batch deleter for multiple nodes
+class SafeNodeBatchDeleter : public QRunnable {
+    public:
+        explicit SafeNodeBatchDeleter(const QList<QSGNode*>& nodes) : m_nodes(nodes) {}
+        
+        void run() override {
+            for (QSGNode* node : m_nodes) {
+                if (node) {
+                    delete node;
+                }
+            }
+            m_nodes.clear();
+        }
+        
+    private:
+        QList<QSGNode*> m_nodes;
+};
 
 class CustomImageListView : public QQuickItem
 {
@@ -56,9 +93,27 @@ class CustomImageListView : public QQuickItem
     Q_PROPERTY(bool enableTextureMetrics READ enableTextureMetrics WRITE setEnableTextureMetrics NOTIFY enableTextureMetricsChanged)
 
 private:
+    // Move ImageData struct definition to the top of the private section
+    struct ImageData {
+        QString url;
+        QString title;
+        QString category;
+        QString description;
+        QString id;
+        QString thumbnailUrl;
+        QMap<QString, QString> links;
+        
+        bool operator==(const ImageData& other) const {
+            return url == other.url && 
+                   title == other.title && 
+                   category == other.category && 
+                   id == other.id;
+        }
+    };
 
-    // Add the network manager to private member variables section
+    // Now we can use ImageData in member variables
     QNetworkAccessManager* m_networkManager = nullptr;
+    QVector<ImageData> m_imageData;
     qreal m_startPositionX = 0;  // Add this line for the start position
     int m_count = 15;
     qreal m_itemWidth = 200;
@@ -132,6 +187,9 @@ private:
     void animateScroll(const QString& category, qreal targetX);
     void stopCurrentAnimation();
 
+    // Add member to store complete JSON document
+    QJsonObject m_parsedJson;  // Add this line
+
     // Add flag to track destruction state
     bool m_isBeingDestroyed = false;
 
@@ -195,6 +253,10 @@ private:
         collectTextures(root, textures);
         return textures.size();
     }
+
+    // Add these new methods
+    QVector<int> getVisibleIndices();
+    void handleContentPositionChange();
 
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
@@ -299,6 +361,8 @@ signals:
     void jsonSourceChanged();
     void linkActivated(const QString& action, const QString& url);  // Add this signal
     void startPositionXChanged();
+    void moodImageSelected(const QString& url);  // Add this new signal
+    void assetFocused(const QJsonObject& assetData);  // Modified to pass complete JSON object
     void enableNodeMetricsChanged();
     void enableTextureMetricsChanged();
 
@@ -313,8 +377,7 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
 
 private:
-    // Add OpenGL initialization method
-    void initializeGL();
+    QMutex m_networkMutex;
     
     // Add loadAllImages declaration with other loading-related methods
     void loadAllImages();
@@ -374,24 +437,8 @@ private:
 
     void loadFromJson(const QUrl &source);
     void processJsonData(const QByteArray &data);
-    struct ImageData {
-        QString url;
-        QString title;
-        QString category;
-        QString description;  // Add additional fields
-        QString id;          // for menu item data
-        QString thumbnailUrl;  // Add this field
-        QMap<QString, QString> links;  // Add this to store action links (OK, info, etc)
-        
-        bool operator==(const ImageData& other) const {
-            return url == other.url && 
-                   title == other.title && 
-                   category == other.category && 
-                   id == other.id;
-        }
-    };
 
-    QVector<ImageData> m_imageData;
+    //QVector<ImageData> m_imageData;
 
     // Organize all node creation methods together in one place
     QSGGeometryNode* createTexturedRect(const QRectF &rect, QSGTexture *texture, bool isFocused = false);
@@ -412,8 +459,21 @@ private slots:
     void onNetworkReplyFinished() {
         QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
         if (!reply) return;
-
-        int index = m_pendingRequests.key(reply, -1);
+        
+        int index = -1;
+        
+        // Minimize mutex lock duration - just extract what we need
+        {
+            QMutexLocker locker(&m_networkMutex);
+            index = m_pendingRequests.key(reply, -1);
+            
+            // Remove from pending requests map while under lock
+            if (index != -1) {
+                m_pendingRequests.remove(index);
+            }
+        }
+        
+        // Process the reply outside of mutex lock to avoid deadlocks
         if (index == -1) {
             reply->deleteLater();
             return;
@@ -436,15 +496,25 @@ private slots:
             createFallbackTexture(index);
         }
 
-        m_pendingRequests.remove(index);
         reply->deleteLater();
     }
 
     void onNetworkError(QNetworkReply::NetworkError code) {
         QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
         if (!reply) return;
-
-        int index = m_pendingRequests.key(reply, -1);
+        
+        int index = -1;
+        
+        // Minimize mutex lock duration
+        {
+            QMutexLocker locker(&m_networkMutex);
+            index = m_pendingRequests.key(reply, -1);
+            if (index != -1) {
+                m_pendingRequests.remove(index);
+            }
+        }
+        
+        // Process outside the lock
         if (index != -1) {
             createFallbackTexture(index);
         }
