@@ -1185,52 +1185,48 @@ void CustomImageListView::handleKeyAction(Qt::Key key)
 
     const ImageData &currentItem = m_imageData[m_currentIndex];
     
-    if (key == Qt::Key_Return || key == Qt::Key_Space) {
-        if (currentItem.links.contains("OK")) {
-            // Create JSON object with all node details
-            QJsonObject actionData;
-            actionData["action"] = "OK";
-            actionData["url"] = currentItem.links["OK"];
-            actionData["title"] = currentItem.title;
-            actionData["description"] = currentItem.description;
-            actionData["category"] = currentItem.category;
-            actionData["id"] = currentItem.id;
-            actionData["thumbnailUrl"] = currentItem.thumbnailUrl;
-            actionData["moodImageUri"] = currentItem.url;
-            
-            // Convert QMap to JSON object for links
-            QJsonObject linksObj;
-            for (auto it = currentItem.links.constBegin(); it != currentItem.links.constEnd(); ++it) {
-                linksObj[it.key()] = it.value();
+    // Find the complete JSON object for current item
+    QJsonArray rows = m_parsedJson["menuItems"].toObject()["items"].toArray();
+    for (const QJsonValue &rowVal : rows) {
+        QJsonArray items = rowVal.toObject()["items"].toArray();
+        for (const QJsonValue &itemVal : items) {
+            QJsonObject item = itemVal.toObject();
+            if (item["title"].toString() == currentItem.title) {
+                // Found matching item, now handle the action
+                if (key == Qt::Key_Return || key == Qt::Key_Space) {
+                    QJsonObject actionData;
+                    actionData["action"] = "OK";
+                    actionData["title"] = item["title"].toString();
+                    actionData["description"] = item["shortSynopsis"].toString();
+                    actionData["category"] = currentItem.category;
+                    actionData["id"] = item["assetType"].toString();
+                    actionData["thumbnailUrl"] = item["thumbnailUri"].toString();
+                    actionData["moodImageUri"] = item["moodImageUri"].toString();
+                    
+                    // Add complete links array from original JSON
+                    actionData["links"] = item["links"];
+                    
+                    qDebug() << "Emitting action data:" << actionData;
+                    emit linkActivated("OK", QJsonDocument(actionData).toJson(QJsonDocument::Compact));
+                }
+                else if (key == Qt::Key_I) {
+                    QJsonObject actionData;
+                    actionData["action"] = "info";
+                    actionData["title"] = item["title"].toString();
+                    actionData["description"] = item["shortSynopsis"].toString();
+                    actionData["category"] = currentItem.category;
+                    actionData["id"] = item["assetType"].toString();
+                    actionData["thumbnailUrl"] = item["thumbnailUri"].toString();
+                    actionData["moodImageUri"] = item["moodImageUri"].toString();
+                    
+                    // Add complete links array from original JSON
+                    actionData["links"] = item["links"];
+                    
+                    qDebug() << "Emitting action data:" << actionData;
+                    emit linkActivated("info", QJsonDocument(actionData).toJson(QJsonDocument::Compact));
+                }
+                break;
             }
-            actionData["links"] = linksObj;
-
-            // Convert to JSON string and emit
-            emit linkActivated("OK", QJsonDocument(actionData).toJson(QJsonDocument::Compact));
-        }
-    }
-    else if (key == Qt::Key_I) {
-        if (currentItem.links.contains("info")) {
-            // Create JSON object with all node details
-            QJsonObject actionData;
-            actionData["action"] = "info";
-            actionData["url"] = currentItem.links["info"];
-            actionData["title"] = currentItem.title;
-            actionData["description"] = currentItem.description;
-            actionData["category"] = currentItem.category;
-            actionData["id"] = currentItem.id;
-            actionData["thumbnailUrl"] = currentItem.thumbnailUrl;
-            actionData["moodImageUri"] = currentItem.url;
-            
-            // Convert QMap to JSON object for links
-            QJsonObject linksObj;
-            for (auto it = currentItem.links.constBegin(); it != currentItem.links.constEnd(); ++it) {
-                linksObj[it.key()] = it.value();
-            }
-            actionData["links"] = linksObj;
-
-            // Convert to JSON string and emit
-            emit linkActivated("info", QJsonDocument(actionData).toJson(QJsonDocument::Compact));
         }
     }
 }
