@@ -1,6 +1,5 @@
 import QtQuick 2.5
 import QtQuick.Window 2.2
-import QtQuick.Controls 1.4
 import Custom 1.0
 
 Window {
@@ -10,18 +9,13 @@ Window {
     color: "black"
     title: qsTr("Menu Gallery View")
 
-    // Add helper function at Window level
-    function isBackKey(key) {
-        return key === Qt.Key_Back || 
-               key === Qt.Key_Escape || 
-               key === Qt.Key_Backspace
-    }
-
-    // Add focus scope to manage focus properly
-    FocusScope {
-        id: rootFocusScope
+    CustomImageListView {
+        id: imageListView
         anchors.fill: parent
-        focus: true  // Give focus to the scope
+        jsonSource: "qrc:/data/embeddedHubMenu.json"
+        focus: true
+        clip: true
+        startPositionX: 50  // Specify the starting X position here (e.g., 50 pixels)
 
         // Add vertical menu rectangle
         Rectangle {
@@ -253,6 +247,7 @@ Window {
             }
         }
     }
+
 
     // Metrics overlay
     MetricsOverlay {
