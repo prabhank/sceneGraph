@@ -258,6 +258,9 @@ private:
     QVector<int> getVisibleIndices();
     void handleContentPositionChange();
 
+    // Add this declaration to the private section
+    void animateVerticalScroll(qreal targetY);
+
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
     ~CustomImageListView();
@@ -392,7 +395,7 @@ private:
     void debugResourceSystem() const;  // Add this line
     void tryLoadImages();
     void updateFocus();
-    void navigateLeft();
+    bool navigateLeft();
     void navigateRight();
     void ensureFocus();  // Add this
     void navigateUp();
@@ -529,6 +532,18 @@ private slots:
             qDebug() << "Download progress for index" << index << ":"
                      << bytesReceived << "/" << bytesTotal << "bytes";
         }
+    }
+    
+    void onScrollAnimationValueChanged(const QVariant &value) {
+        QPropertyAnimation* anim = qobject_cast<QPropertyAnimation*>(sender());
+        if (!anim) return;
+        
+        // Get the category from the animation object
+        QString category = anim->property("category").toString();
+        if (category.isEmpty()) return;
+        
+        // Update the content X position for this category
+        setCategoryContentX(category, value.toReal());
     }
 };
 
