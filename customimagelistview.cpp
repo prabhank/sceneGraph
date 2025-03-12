@@ -1310,6 +1310,9 @@ void CustomImageListView::navigateRight()
     NAV_LOG_EVENT(CustomNavLogger::NAV_RIGHT_START);
     NAV_LOG_PARAM(CustomNavLogger::NAV_RIGHT_START, m_currentIndex, "fromIndex", m_currentIndex);
 
+    // Start FPS measurement
+    startFpsMeasurement();
+
     QString currentCategory = m_imageData[m_currentIndex].category;
     int nextIndex = m_currentIndex + 1;
     
@@ -1351,6 +1354,10 @@ void CustomImageListView::navigateRight()
         
         ensureIndexVisible(nextIndex);
         update();
+
+        // Stop FPS measurement
+        stopFpsMeasurement();
+
         return;
     }
 
@@ -2621,4 +2628,25 @@ void CustomImageListView::updateMetricCounts(int nodes, int textures, qint64 tex
                  << "Textures:" << m_textureCount
                  << "Texture Memory:" << m_textureMemoryUsage << "bytes";
     }
+}
+
+void CustomImageListView::startFpsMeasurement()
+{
+    m_frameCount = 0;
+    m_startTime = QDateTime::currentMSecsSinceEpoch();
+    connect(window(), &QQuickWindow::frameSwapped, this, &CustomImageListView::onFrameSwapped);
+}
+
+void CustomImageListView::stopFpsMeasurement()
+{
+    disconnect(window(), &QQuickWindow::frameSwapped, this, &CustomImageListView::onFrameSwapped);
+    qint64 elapsedTime = QDateTime::currentMSecsSinceEpoch() - m_startTime;
+    qreal fps = (elapsedTime > 0) ? (m_frameCount * 1000.0 / elapsedTime) : 0.0;
+    qDebug() << "FPS during navigateRight:" << fps;
+    CustomNavLogger::instance().logEventWithParamFloat(CustomNavLogger::NAV_ANIM_COMPLETE, -1, "fps", fps);
+}
+
+void CustomImageListView::onFrameSwapped()
+{
+    m_frameCount++;
 }
