@@ -271,6 +271,10 @@ private:
     // Add this helper method for property validation
     bool checkAndCreateDynamicProperty(const QString& propName);
 
+    // Add member variables for fps measurement
+    int m_frameCount = 0;
+    qint64 m_startTime = 0;
+
 public:
     CustomImageListView(QQuickItem *parent = nullptr);
     ~CustomImageListView();
@@ -362,6 +366,10 @@ public:
 
     // Add method to calculate texture memory usage
     qint64 calculateTextureMemoryUsage() const;
+
+    // Add fps measurement methods
+    void startFpsMeasurement();
+    void stopFpsMeasurement();
 
 signals:
     void countChanged();
